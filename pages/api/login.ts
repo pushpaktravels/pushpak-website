@@ -11,10 +11,13 @@
 // Brute-force defense:
 //   - Per-IP rate limit (10 attempts / 5 min)
 //   - Per-account: 5 failed attempts → 15-min lockout
+//
+// Uses node-postgres (lib/pg) — Prisma+pgbouncer prepared-statement
+// collisions on Supabase serverless break the typed Prisma client.
 // ============================================================
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { z } from 'zod';
-import { prisma } from '@/lib/db';
+import { query, queryOne, newId } from '@/lib/pg';
 import { verifyPassword } from '@/lib/password';
 import { signAccessToken } from '@/lib/jwt';
 import { setAuthCookies } from '@/lib/cookies';
@@ -54,95 +57,114 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (!parsed.success) return res.status(400).json({ ok: false, error: 'Bad request' });
   const { execId, password, totp } = parsed.data;
 
-  const user = await prisma.user.findUnique({ where: { execId } });
-  // Constant-time-ish: even when user doesn't exist, do a fake hash check to
-  // mitigate timing attacks that would otherwise let an attacker enumerate IDs.
-  if (!user) {
-    await verifyPassword('$argon2id$v=19$m=65536,t=3,p=1$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', password);
-    await audit(req, null, 'LOGIN_FAIL', execId, { reason: 'unknown_id' });
-    return res.status(401).json({ ok: false, error: 'Invalid ID or password' });
-  }
+  try {
+    const user = await queryOne<any>(
+      `SELECT * FROM "User" WHERE "execId" = $1 LIMIT 1`,
+      [execId]
+    );
 
-  if (!user.active) {
-    await audit(req, user, 'LOGIN_FAIL', user.execId, { reason: 'inactive' });
-    return res.status(401).json({ ok: false, error: 'Account inactive' });
-  }
-
-  if (user.lockedUntil && user.lockedUntil > new Date()) {
-    return res.status(429).json({
-      ok: false,
-      error: `Account locked until ${user.lockedUntil.toISOString().slice(11, 16)} UTC`,
-    });
-  }
-
-  const passOk = await verifyPassword(user.passwordHash, password);
-  if (!passOk) {
-    const attempts = user.failedAttempts + 1;
-    const data: any = { failedAttempts: attempts };
-    if (attempts >= LOCKOUT_AFTER_ATTEMPTS) {
-      data.lockedUntil = new Date(Date.now() + LOCKOUT_MIN * 60 * 1000);
-      data.failedAttempts = 0; // reset counter once locked
+    // Constant-time-ish: even when user doesn't exist, do a fake hash check to
+    // mitigate timing attacks that would otherwise let an attacker enumerate IDs.
+    if (!user) {
+      await verifyPassword(
+        '$argon2id$v=19$m=65536,t=3,p=1$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+        password
+      );
+      await audit(req, null, 'LOGIN_FAIL', execId, { reason: 'unknown_id' });
+      return res.status(401).json({ ok: false, error: 'Invalid ID or password' });
     }
-    await prisma.user.update({ where: { id: user.id }, data });
-    await audit(req, user, 'LOGIN_FAIL', user.execId, { reason: 'bad_password', attempts });
-    return res.status(401).json({ ok: false, error: 'Invalid ID or password' });
-  }
 
-  // Password OK — reset counter
-  if (user.failedAttempts > 0) {
-    await prisma.user.update({ where: { id: user.id }, data: { failedAttempts: 0, lockedUntil: null } });
-  }
+    if (!user.active) {
+      await audit(req, user, 'LOGIN_FAIL', user.execId, { reason: 'inactive' });
+      return res.status(401).json({ ok: false, error: 'Account inactive' });
+    }
 
-  // ── MFA gate ────────────────────────────────────────────────
-  const mfaMandatory = MFA_REQUIRED_ROLES.has(user.role);
-  const mfaEnrolled = !!user.totpSecret;
+    if (user.lockedUntil && new Date(user.lockedUntil) > new Date()) {
+      return res.status(429).json({
+        ok: false,
+        error: `Account locked until ${new Date(user.lockedUntil).toISOString().slice(11, 16)} UTC`,
+      });
+    }
 
-  // First-time MFA-required user without enrollment → kick them into enrollment flow
-  if (mfaMandatory && !mfaEnrolled) {
-    // Issue a "half token" so they can call /api/2fa/enroll
-    const halfToken = await signAccessToken({ sub: user.id, execId: user.execId, role: user.role, mfa: false });
-    const refresh = crypto.randomBytes(48).toString('hex');
-    setAuthCookies(res, halfToken, refresh);
-    return res.json({ ok: true, mfaEnrolled: false, enrollmentRequired: true, user: publicUser(user) });
-  }
+    const passOk = await verifyPassword(user.passwordHash, password);
+    if (!passOk) {
+      const attempts = (user.failedAttempts || 0) + 1;
+      if (attempts >= LOCKOUT_AFTER_ATTEMPTS) {
+        const lockUntil = new Date(Date.now() + LOCKOUT_MIN * 60 * 1000).toISOString();
+        await query(
+          `UPDATE "User" SET "failedAttempts" = 0, "lockedUntil" = $1, "updatedAt" = NOW() WHERE id = $2`,
+          [lockUntil, user.id]
+        );
+      } else {
+        await query(
+          `UPDATE "User" SET "failedAttempts" = $1, "updatedAt" = NOW() WHERE id = $2`,
+          [attempts, user.id]
+        );
+      }
+      await audit(req, user, 'LOGIN_FAIL', user.execId, { reason: 'bad_password', attempts });
+      return res.status(401).json({ ok: false, error: 'Invalid ID or password' });
+    }
 
-  // MFA required + enrolled → expect totp in this same request OR send half-token + prompt
-  if (mfaMandatory && mfaEnrolled) {
-    if (!totp) {
+    // Password OK — reset counter if it was non-zero
+    if ((user.failedAttempts || 0) > 0 || user.lockedUntil) {
+      await query(
+        `UPDATE "User" SET "failedAttempts" = 0, "lockedUntil" = NULL, "updatedAt" = NOW() WHERE id = $1`,
+        [user.id]
+      );
+    }
+
+    // ── MFA gate ────────────────────────────────────────────────
+    const mfaMandatory = MFA_REQUIRED_ROLES.has(user.role);
+    const mfaEnrolled = !!user.totpSecret;
+
+    // First-time MFA-required user without enrollment → kick them into enrollment flow
+    if (mfaMandatory && !mfaEnrolled) {
       const halfToken = await signAccessToken({ sub: user.id, execId: user.execId, role: user.role, mfa: false });
-      setAuthCookies(res, halfToken, '');
-      return res.json({ ok: true, mfaEnrolled: true, needsTotp: true, user: publicUser(user) });
+      const refresh = crypto.randomBytes(48).toString('hex');
+      setAuthCookies(res, halfToken, refresh);
+      return res.json({ ok: true, mfaEnrolled: false, enrollmentRequired: true, user: publicUser(user) });
     }
-    if (!verifyTotp(user.totpSecret!, totp)) {
-      await audit(req, user, 'LOGIN_FAIL', user.execId, { reason: 'bad_totp' });
-      return res.status(401).json({ ok: false, error: 'Invalid 2FA code' });
+
+    // MFA required + enrolled → expect totp in this same request OR send half-token + prompt
+    if (mfaMandatory && mfaEnrolled) {
+      if (!totp) {
+        const halfToken = await signAccessToken({ sub: user.id, execId: user.execId, role: user.role, mfa: false });
+        setAuthCookies(res, halfToken, '');
+        return res.json({ ok: true, mfaEnrolled: true, needsTotp: true, user: publicUser(user) });
+      }
+      if (!verifyTotp(user.totpSecret!, totp)) {
+        await audit(req, user, 'LOGIN_FAIL', user.execId, { reason: 'bad_totp' });
+        return res.status(401).json({ ok: false, error: 'Invalid 2FA code' });
+      }
     }
+
+    // ── Full login ──────────────────────────────────────────────
+    const accessToken = await signAccessToken({
+      sub: user.id, execId: user.execId, role: user.role, mfa: true,
+    });
+    const refreshToken = crypto.randomBytes(48).toString('hex');
+    const refreshHash = crypto.createHash('sha256').update(refreshToken).digest('hex');
+    const expiresAt = new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString();
+
+    await query(
+      `INSERT INTO "RefreshToken" (id, "userId", "tokenHash", "expiresAt", "userAgent", ip)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [newId('rt'), user.id, refreshHash, expiresAt, (req.headers['user-agent'] || '').slice(0, 500), ip]
+    );
+
+    setAuthCookies(res, accessToken, refreshToken);
+
+    await query(
+      `UPDATE "User" SET "lastLoginAt" = NOW(), "lastLoginIp" = $1, "updatedAt" = NOW() WHERE id = $2`,
+      [ip, user.id]
+    );
+    await audit(req, user, 'LOGIN_OK', user.execId);
+
+    return res.json({ ok: true, user: publicUser(user) });
+  } catch (err: any) {
+    console.error('[api/login] error', err);
+    return res.status(500).json({ ok: false, error: err.message || 'Login failed' });
   }
-
-  // ── Full login ──────────────────────────────────────────────
-  const accessToken = await signAccessToken({
-    sub: user.id, execId: user.execId, role: user.role, mfa: true,
-  });
-  const refreshToken = crypto.randomBytes(48).toString('hex');
-  const refreshHash = crypto.createHash('sha256').update(refreshToken).digest('hex');
-  await prisma.refreshToken.create({
-    data: {
-      userId: user.id,
-      tokenHash: refreshHash,
-      expiresAt: new Date(Date.now() + 7 * 24 * 3600 * 1000),
-      userAgent: (req.headers['user-agent'] || '').slice(0, 500),
-      ip,
-    },
-  });
-  setAuthCookies(res, accessToken, refreshToken);
-
-  await prisma.user.update({
-    where: { id: user.id },
-    data: { lastLoginAt: new Date(), lastLoginIp: ip },
-  });
-  await audit(req, user, 'LOGIN_OK', user.execId);
-
-  return res.json({ ok: true, user: publicUser(user) });
 }
 
 function publicUser(u: any) {
