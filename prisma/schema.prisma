@@ -1,0 +1,381 @@
+// ============================================================
+// PUSHPAK PORTAL — database schema (Postgres via Supabase)
+// ============================================================
+// One-to-one mapping from the legacy 13 Google Sheets so the
+// migration script can map row-by-row. Types are tightened
+// (numbers as Decimal, dates as DateTime). Indexes added where
+// the portal queries will hit.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ─── USERS / AUTH ─────────────────────────────────────────────
+enum Role {
+  owner
+  admin
+  cm
+  exec
+  analyst
+}
+
+model User {
+  id              String   @id @default(cuid())
+  execId          String   @unique // "VANSHIKA01" etc — what the user types
+  name            String   // "VANSHIKA"
+  passwordHash    String   // argon2id
+  role            Role     @default(exec)
+  badge           String   @default("Executive")
+  team            String[] // exec names this user can see; empty = own only; ["ALL"] = god view
+  active          Boolean  @default(true)
+  scoreboard      Boolean  @default(false)
+  // Per-user override of which views they can see/edit (overrides role default)
+  viewPerms       String[] @default([])
+  viewReadOnly    String[] @default([])
+  // 2FA (TOTP)
+  totpSecret      String?  // base32 encoded; null if 2FA not enrolled yet
+  totpEnrolledAt  DateTime?
+  // Brute-force lockout
+  failedAttempts  Int      @default(0)
+  lockedUntil     DateTime?
+  // Audit
+  lastLoginAt     DateTime?
+  lastLoginIp     String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([execId])
+  @@index([role])
+}
+
+// ─── REFRESH TOKEN STORE ──────────────────────────────────────
+// Long-lived refresh tokens; access tokens stay in HttpOnly cookies, no DB roundtrip.
+model RefreshToken {
+  id          String   @id @default(cuid())
+  userId      String
+  tokenHash   String   @unique // hash of the actual token; we never store plaintext
+  expiresAt   DateTime
+  revokedAt   DateTime?
+  userAgent   String?
+  ip          String?
+  createdAt   DateTime @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+// ─── ACCOUNT TRACKER ──────────────────────────────────────────
+// The heart of the system — one row per debtor account.
+// Mirrors 10_TRACKER sheet.
+model Account {
+  id             String   @id @default(cuid())
+  party          String   @unique // unique business key
+  family         String?
+  exec           String?  // executive name
+  cm             String?  // collection manager name
+  tier           String   @default("A") // A/B/C/D/E
+  tierOverride   String?  // manual override sticks through refresh
+  alert          String?  // "Due Soon" / "Escalate" / "Review by Mgt" / "On Hold"
+  alertOverride  String?
+  bill           Decimal  @default(0) @db.Decimal(14, 2) // outstanding
+  d30            Decimal  @default(0) @db.Decimal(14, 2)
+  d60            Decimal  @default(0) @db.Decimal(14, 2)
+  d90            Decimal  @default(0) @db.Decimal(14, 2)
+  d90p           Decimal  @default(0) @db.Decimal(14, 2)
+  stage          String?  // "S1 — AP / Accounts" etc.
+  stageCalls     Int      @default(0)
+  stageSince     DateTime?
+  recentCall     DateTime?
+  callOutcome    String?
+  nextFu         DateTime?
+  payExpected    DateTime?
+  creditLimit    Decimal  @default(0) @db.Decimal(14, 2)
+  creditPeriod   String?  // "≤30 days" etc.
+  onTimePct      String?
+  history        String?  @db.Text // freeform append-only notes
+  mgtNote        String?  @db.Text
+  status         String   @default("Pending")
+  onHold         String?  // "" / "Candidate" / "Active"
+  branch         String?
+  lastTouched    DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  promises       Promise[]
+  holdRecords    HoldRecord[]
+  legalCases    LegalCase[]
+  paymentPlans  PaymentPlan[]
+  collections   CollectionLog[]
+  history_log   AccountHistory[]
+  pointEvents   PointEvent[]
+
+  @@index([exec])
+  @@index([cm])
+  @@index([tier])
+  @@index([onHold])
+  @@index([status])
+}
+
+// ─── CLIENT MASTER ────────────────────────────────────────────
+// Contact + segment info — separate from Account so we can keep
+// the contact even when the account hits zero balance.
+model ClientMaster {
+  id           String   @id @default(cuid())
+  party        String   @unique
+  family       String?
+  segment      String?
+  phone1       String?
+  phone2       String?
+  whatsapp     String?
+  email        String?
+  owner        String?
+  ap           String?
+  admin        String?
+  address      String?  @db.Text
+  creditLimit  Decimal  @default(0) @db.Decimal(14, 2)
+  creditTerms  Int      @default(0)
+  vip          String?  // "YES" / "NO" / ""
+  notes        String?  @db.Text
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([party])
+  @@index([segment])
+}
+
+// ─── PROMISE LEDGER ───────────────────────────────────────────
+enum PromiseStatus {
+  Open
+  Kept
+  Broken
+  Cancelled
+}
+
+model Promise {
+  id             String        @id @default(cuid())
+  party          String
+  family         String?
+  expectedBy     DateTime
+  exec           String?       // who logged it
+  outstandingAt  Decimal       @db.Decimal(14, 2)
+  status         PromiseStatus @default(Open)
+  settledOn      DateTime?
+  amountReceived Decimal       @default(0) @db.Decimal(14, 2)
+  notes          String?       @db.Text
+  loggedAt       DateTime      @default(now())
+
+  account        Account?      @relation(fields: [party], references: [party], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([party])
+  @@index([status])
+  @@index([expectedBy])
+}
+
+// ─── BOOKING HOLD ─────────────────────────────────────────────
+enum HoldStatus {
+  Candidate
+  Active
+  Released
+}
+
+model HoldRecord {
+  id            String     @id @default(cuid())
+  party         String
+  family        String?
+  outstanding   Decimal    @db.Decimal(14, 2)
+  reason        String     @db.Text
+  status        HoldStatus @default(Candidate)
+  confirmedBy   String?
+  confirmedOn   DateTime?
+  releasedBy    String?
+  releasedOn    DateTime?
+  addedOn       DateTime   @default(now())
+
+  account       Account?   @relation(fields: [party], references: [party], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([party])
+  @@index([status])
+}
+
+// ─── PAYMENT PLAN (DOUBTFUL) ──────────────────────────────────
+enum PlanInstStatus {
+  Pending
+  Received
+  Broken
+  Cancelled
+}
+
+model PaymentPlan {
+  id          String      @id @default(cuid())
+  party       String
+  family      String?
+  planTotal   Decimal     @db.Decimal(14, 2)
+  startDate   DateTime
+  instalments PlanInstalment[]
+  createdAt   DateTime    @default(now())
+  cancelledAt DateTime?
+
+  account     Account?    @relation(fields: [party], references: [party], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([party])
+}
+
+model PlanInstalment {
+  id        String         @id @default(cuid())
+  planId    String
+  plan      PaymentPlan    @relation(fields: [planId], references: [id], onDelete: Cascade)
+  instNo    Int            // 1-based instalment number
+  dueDate   DateTime
+  amount    Decimal        @db.Decimal(14, 2)
+  status    PlanInstStatus @default(Pending)
+  received  Decimal        @default(0) @db.Decimal(14, 2)
+  settledOn DateTime?
+  notes     String?
+
+  @@index([planId])
+  @@index([status])
+  @@index([dueDate])
+}
+
+// ─── LEGAL LEDGER ─────────────────────────────────────────────
+enum LegalStatus {
+  NoticeSent
+  Filed
+  InCourt
+  Settled
+  Dropped
+  Recovered
+  WrittenOff
+}
+
+model LegalCase {
+  id           String      @id @default(cuid())
+  party        String
+  family       String?
+  filedOn      DateTime    @default(now())
+  outstanding  Decimal     @db.Decimal(14, 2)
+  status       LegalStatus @default(NoticeSent)
+  lawyer       String?
+  caseRef      String?
+  nextHearing  DateTime?
+  notes        String?     @db.Text
+  closedOn     DateTime?   // when terminal status set
+  updatedAt    DateTime    @updatedAt
+
+  account      Account?    @relation(fields: [party], references: [party], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([party])
+  @@index([status])
+}
+
+// ─── COLLECTION LOG ───────────────────────────────────────────
+// One row per collection event (outstanding dropped between refreshes)
+model CollectionLog {
+  id              String   @id @default(cuid())
+  date            DateTime @default(now()) @db.Date
+  party           String
+  family          String?
+  exec            String?
+  cm              String?
+  amount          Decimal  @db.Decimal(14, 2)
+  prevOutstanding Decimal  @db.Decimal(14, 2)
+  newOutstanding  Decimal  @db.Decimal(14, 2)
+  trigger         String?  // "Refresh by VANSHIKA01" / "Manual mark-paid" etc.
+  notes           String?
+
+  account         Account? @relation(fields: [party], references: [party], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([party])
+  @@index([exec])
+  @@index([date])
+}
+
+// ─── ACCOUNT HISTORY (per-account event log) ──────────────────
+// Mirrors 91_ACCOUNT_HISTORY. Used by the Timeline tab in drawer.
+model AccountHistory {
+  id          String   @id @default(cuid())
+  ts          DateTime @default(now())
+  party       String
+  exec        String?
+  cm          String?
+  action      String   // "Call logged" / "Promise added" / "Mark paid" etc.
+  oldValue    String?  @db.Text
+  newValue    String?  @db.Text
+  outstanding Decimal? @db.Decimal(14, 2)
+  source      String?  // "Portal" / "Refresh" / "System"
+
+  account     Account? @relation(fields: [party], references: [party], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([party])
+  @@index([ts])
+}
+
+// ─── AUDIT LOG (every privileged mutation) ────────────────────
+// Distinct from AccountHistory: this is for OWNER security review.
+// "Who changed Reeta's credit limit last Tuesday?" answered here.
+model AuditLog {
+  id          String   @id @default(cuid())
+  ts          DateTime @default(now())
+  userId      String?  // null for system actions
+  execId      String?
+  action      String   // "USER_UPDATE" / "HOLD_APPROVE" / "TIER_CHANGE" etc.
+  target      String?  // party / userId being affected
+  detail      String?  @db.Text // JSON-encoded before/after
+  ip          String?
+  userAgent   String?
+
+  @@index([ts])
+  @@index([userId])
+  @@index([action])
+  @@index([target])
+}
+
+// ─── REFRESH LOG ──────────────────────────────────────────────
+// One row per processRefresh — total / delta / promises kept-broken / new hold candidates
+model RefreshLog {
+  id                String   @id @default(cuid())
+  ts                DateTime @default(now())
+  byWhom            String
+  accountCount      Int
+  totalOutstanding  Decimal  @db.Decimal(14, 2)
+  delta             Decimal  @db.Decimal(14, 2) // total - prevTotal
+  promisesKept      Int      @default(0)
+  promisesBroken    Int      @default(0)
+  newHoldCandidates Int      @default(0)
+  newCollections    Int      @default(0)
+  notes             String?
+
+  @@index([ts])
+}
+
+// ─── POINTS LOG (scoreboard events) ───────────────────────────
+model PointEvent {
+  id      String   @id @default(cuid())
+  ts      DateTime @default(now())
+  exec    String   // points are tracked by exec NAME, not user record
+  event   String   // CALL / PROMISE_ADDED / PROMISE_KEPT / PROMISE_BROKEN / HOLD_NEW / STALE / RECOVERY
+  party   String?
+  points  Int      // can be negative
+  detail  String?
+
+  account Account? @relation(fields: [party], references: [party], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([exec])
+  @@index([ts])
+  @@index([event])
+}
+
+// ─── SETTINGS (key-value, editable from portal Settings page) ─
+model Setting {
+  key       String   @id // "DUE_SOON_DAYS" / "POINTS_PER_CALL" etc.
+  value     String   // stored as string; cast on read
+  category  String   @default("misc") // for the collapsible groups in UI
+  updatedAt DateTime @updatedAt
+  updatedBy String?
+}
