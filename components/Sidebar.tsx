@@ -90,9 +90,13 @@ export function Sidebar({ user }: { user: CurrentUser }) {
   return (
     <aside className="sidebar">
       <div className="sidebar-brand">
+        <img
+          src="/pushpak-logo.png"
+          alt="Pushpak"
+          style={{ height: 38, width: 'auto', objectFit: 'contain' }}
+        />
         <div className="sidebar-brand-text">
-          <div className="sidebar-brand-name">PUSHPAK</div>
-          <div className="sidebar-tag">Debtor Control</div>
+          <div className="sidebar-tag" style={{ letterSpacing: '.18em' }}>DEBTOR CONTROL</div>
         </div>
       </div>
       <nav className="sidebar-nav scroll">
