@@ -47,21 +47,22 @@ export default function Login() {
       <Head><title>Pushpak · Sign in</title></Head>
       <main style={{
         minHeight: '100vh',
-        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'space-between',
+        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+        gap: 28,
         background: 'linear-gradient(180deg, #0F2855 0%, #08183A 100%)',
         color: '#fff',
         fontFamily: 'Inter, system-ui, sans-serif',
-        padding: '48px 24px 32px',
+        padding: '48px 24px',
       }}>
         {/* Top brand */}
         <div style={{ textAlign: 'center' }}>
           <img
-            src="/pushpak-logo.png"
+            src="/pushpak-logo2.png"
             alt="Pushpak"
-            style={{ height: 76, width: 'auto', margin: '0 auto', display: 'block' }}
+            style={{ height: 64, width: 'auto', margin: '0 auto', display: 'block' }}
           />
           <div style={{
-            marginTop: 12, fontSize: 11, fontWeight: 600,
+            marginTop: 10, fontSize: 10.5, fontWeight: 600,
             letterSpacing: '.42em', textTransform: 'uppercase',
             color: 'rgba(255,255,255,0.72)',
           }}>
@@ -126,16 +127,16 @@ export default function Login() {
           </div>
         </form>
 
-        {/* Footer quote */}
+        {/* Footer quote — sits naturally below the card now that the main container is center-justified */}
         <div style={{ textAlign: 'center', maxWidth: 520, color: 'rgba(255,255,255,0.62)' }}>
           <div style={{
             fontFamily: 'Lora, Georgia, serif', fontStyle: 'italic',
-            fontSize: 15, lineHeight: 1.55, fontWeight: 500,
+            fontSize: 14.5, lineHeight: 1.55, fontWeight: 500,
           }}>
             "Quality is never an accident; it is always the result of intelligent effort."
           </div>
           <div style={{
-            marginTop: 10, fontSize: 10, fontWeight: 700,
+            marginTop: 8, fontSize: 9.5, fontWeight: 700,
             letterSpacing: '.36em', textTransform: 'uppercase',
             color: 'rgba(255,255,255,0.45)',
           }}>

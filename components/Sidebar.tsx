@@ -91,7 +91,7 @@ export function Sidebar({ user }: { user: CurrentUser }) {
     <aside className="sidebar">
       <div className="sidebar-brand">
         <img
-          src="/pushpak-logo.png"
+          src="/pushpak-logo2.png"
           alt="Pushpak"
           style={{ height: 38, width: 'auto', objectFit: 'contain' }}
         />
