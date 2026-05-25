@@ -1,23 +1,45 @@
 // ============================================================
 // AccountDrawer — slide-in panel showing one account's full record.
 // ============================================================
-// Opened with an accountId from any list view (Hold Check, Team
-// Worklist, Promise Ledger, etc.). 4 tabs:
-//   Overview — KPIs + status + financial snapshot
-//   Timeline — AccountHistory entries, newest first
-//   Contact  — phone / whatsapp / email / owner / VIP flag
-//   Promises — open + recent closed promises
+// Mirrors the old Apps Script portal layout:
 //
-// Action buttons (Log Call, Add Promise, Approve Hold) live in the
-// action bar below the header. Each opens a modal; after a successful
-// mutation the drawer re-fetches its data so changes show up live.
+//   ▸ Header: party name (h2), clickable TIER badge top-right with
+//             dropdown to change tier, close ×.
+//             Subtitle: FAMILY · Exec NAME · CM NAME
+//             Status pills (PENDING / CANDIDATE / ACTIVE / DUE SOON).
+//
+//   ▸ Tabs: ACCOUNT | TIMELINE | CONTACT
+//
+//   ▸ ACCOUNT tab (top → bottom):
+//       1. Context section with colored LEFT BORDER (only if applicable)
+//            • Legal (tier E):   red border   "LEGAL CASE · STATUS"
+//            • Doubtful (tier D): yellow border "DOUBTFUL PLAN"
+//            • Promises ledger: blue border  "PROMISE HISTORY (n)"
+//       2. OUTSTANDING amount + NEXT ACTION
+//       3. Aging buckets (≤30d / ≤60d / ≤90d / >90d)
+//       4. 4 round action buttons: LOG CALL · PAID · ON HOLD · CREDIT
+//       5. Add phone / Add WhatsApp (two columns)
+//       6. ESCALATION fields: Stage / Recent Call / Call Outcome /
+//                              Next Follow-up / Pay Expected
+//       7. HISTORY (freeform text, editable)
+//
+//   ▸ TIMELINE tab: AccountHistory rows, newest first.
+//   ▸ CONTACT tab:   ClientMaster contact info.
 // ============================================================
 import { useCallback, useEffect, useState } from 'react';
 import { fmtINR, fmtDate, fmtDateTime, fmtRelative } from '../lib/fmt';
-import { TierBadge, TierLabel } from './TierBadge';
 
-type Tab = 'overview' | 'timeline' | 'contact' | 'promises';
-type ModalKind = null | 'log-call' | 'add-promise' | 'settle-promise' | 'flag-hold';
+type Tab = 'account' | 'timeline' | 'contact';
+type ModalKind =
+  | null
+  | 'log-call'
+  | 'add-promise'
+  | 'settle-promise'
+  | 'flag-hold'
+  | 'mark-paid'
+  | 'credit'
+  | 'edit-contact'
+  | 'edit-history';
 
 type DrawerData = {
   account: any;
@@ -25,23 +47,30 @@ type DrawerData = {
   promises: any[];
   holds: any[];
   history: any[];
+  paymentPlan: any | null;
+  instalments: any[];
+  legalCase: any | null;
 };
 
 type Props = {
-  accountId: string | null;     // null = closed
+  accountId: string | null;
   onClose: () => void;
+};
+
+const TIER_LABEL: Record<string, string> = {
+  A: 'A — Recents', B: 'B — Due', C: 'C — Overdue', D: 'D — Doubtful', E: 'E — Legal',
 };
 
 export function AccountDrawer({ accountId, onClose }: Props) {
   const [data, setData] = useState<DrawerData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [tab, setTab] = useState<Tab>('overview');
+  const [tab, setTab] = useState<Tab>('account');
   const [modal, setModal] = useState<ModalKind>(null);
   const [settlePromiseId, setSettlePromiseId] = useState<string | null>(null);
+  const [tierMenuOpen, setTierMenuOpen] = useState(false);
   const [actionErr, setActionErr] = useState<string | null>(null);
 
-  // Reusable loader so mutation flows can re-fetch after a successful save.
   const loadData = useCallback(async (id: string) => {
     setLoading(true);
     setError(null);
@@ -56,24 +85,20 @@ export function AccountDrawer({ accountId, onClose }: Props) {
     }
   }, []);
 
-  // Fetch when accountId changes; reset tab to overview on each open.
   useEffect(() => {
-    if (!accountId) {
-      setData(null);
-      setError(null);
-      return;
-    }
-    setTab('overview');
+    if (!accountId) { setData(null); setError(null); return; }
+    setTab('account');
     setModal(null);
+    setTierMenuOpen(false);
+    setActionErr(null);
     loadData(accountId);
   }, [accountId, loadData]);
 
-  // Called by modals after a successful mutation to refresh drawer state.
   const refresh = useCallback(() => {
     if (accountId) loadData(accountId);
   }, [accountId, loadData]);
 
-  // Close on Esc.
+  // Esc to close
   useEffect(() => {
     if (!accountId) return;
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
@@ -81,177 +106,718 @@ export function AccountDrawer({ accountId, onClose }: Props) {
     return () => window.removeEventListener('keydown', onKey);
   }, [accountId, onClose]);
 
-  if (!accountId) return null;
+  async function changeTier(newTier: string) {
+    if (!accountId) return;
+    setTierMenuOpen(false);
+    if (!data?.account || data.account.tier === newTier) return;
+    setActionErr(null);
+    try {
+      const r = await fetch(`/api/accounts/${encodeURIComponent(accountId)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tier: newTier }),
+      }).then(x => x.json());
+      if (!r?.ok) throw new Error(r?.error || 'Failed to change tier');
+      refresh();
+    } catch (e: any) { setActionErr(e.message); }
+  }
 
+  if (!accountId) return null;
   const a = data?.account;
 
   return (
     <>
-      {/* Backdrop */}
-      <div
-        onClick={onClose}
-        style={{
-          position: 'fixed', inset: 0, background: 'rgba(11, 22, 41, 0.45)',
-          backdropFilter: 'blur(2px)', zIndex: 100,
-        }}
-      />
-      {/* Drawer panel */}
-      <aside
-        role="dialog"
-        aria-label="Account details"
-        style={{
-          position: 'fixed', top: 0, right: 0, bottom: 0,
-          width: 'min(640px, 92vw)',
-          background: 'var(--bg-1, #fff)',
-          boxShadow: '-24px 0 48px rgba(11,22,41,.18)',
-          zIndex: 101, display: 'flex', flexDirection: 'column',
-          overflow: 'hidden',
-        }}
-      >
+      <div onClick={onClose} style={{
+        position: 'fixed', inset: 0, background: 'rgba(8, 24, 58, 0.55)',
+        backdropFilter: 'blur(3px)', zIndex: 100,
+      }} />
+
+      <aside role="dialog" aria-label="Account details" style={{
+        position: 'fixed', top: 0, right: 0, bottom: 0,
+        width: 'min(680px, 94vw)',
+        background: 'var(--bg-1, #FBF6E8)',
+        boxShadow: '-30px 0 60px rgba(8,24,58,.22)',
+        zIndex: 101, display: 'flex', flexDirection: 'column',
+        overflow: 'hidden',
+      }}>
         {/* Header */}
         <header style={{
-          padding: '20px 28px 16px',
+          padding: '20px 26px 14px',
           borderBottom: '1px solid var(--line, #e7eaf0)',
-          display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start',
-          gap: 16,
+          background: '#fff',
         }}>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 10, letterSpacing: '.22em', textTransform: 'uppercase', color: 'var(--t-3)', fontWeight: 700, marginBottom: 6 }}>
-              {a?.family || 'Account detail'}
-            </div>
-            <h2 style={{ fontSize: 18, fontWeight: 600, color: 'var(--navy-deep)', margin: 0, lineHeight: 1.3, wordBreak: 'break-word' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+            <h2 style={{
+              margin: 0, fontSize: 19, fontWeight: 700, color: 'var(--navy-deep)',
+              letterSpacing: '.01em', lineHeight: 1.25, flex: 1, wordBreak: 'break-word',
+            }}>
               {a?.party || (loading ? 'Loading…' : '—')}
             </h2>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              {a && <TierDropdown tier={a.tier} open={tierMenuOpen} onToggle={() => setTierMenuOpen(o => !o)} onPick={changeTier} />}
+              <button onClick={onClose} aria-label="Close" style={{
+                border: 'none', background: 'transparent', cursor: 'pointer',
+                fontSize: 22, color: 'var(--t-3)', lineHeight: 1, padding: 4,
+              }}>×</button>
+            </div>
           </div>
-          <button
-            onClick={onClose}
-            aria-label="Close"
-            style={{
-              border: 'none', background: 'transparent', cursor: 'pointer',
-              padding: 6, color: 'var(--t-2)', fontSize: 22, lineHeight: 1,
-            }}
-          >×</button>
+          {a && (
+            <div style={{ fontSize: 11.5, color: 'var(--t-3)', marginTop: 6, fontWeight: 500, letterSpacing: '.01em' }}>
+              {a.family || '—'}
+              {' · '}
+              <span>Exec <strong style={{ color: 'var(--t-2)' }}>{a.exec || '—'}</strong></span>
+              {a.cm && <>{' · '}<span>CM <strong style={{ color: 'var(--t-2)' }}>{a.cm}</strong></span></>}
+            </div>
+          )}
+          {a && <StatusPillRow account={a} />}
         </header>
-
-        {/* Action bar — quick mutations available regardless of which tab is open */}
-        {a && data && (
-          <div style={{
-            padding: '12px 28px', borderBottom: '1px solid var(--line, #e7eaf0)',
-            display: 'flex', gap: 8, background: 'var(--bg-2, #f6f8fb)', flexWrap: 'wrap',
-          }}>
-            <ActionButton onClick={() => setModal('log-call')}>📞 Log Call</ActionButton>
-            <ActionButton onClick={() => setModal('add-promise')}>➕ Add Promise</ActionButton>
-            {/* Contextual hold button — depends on current hold state */}
-            {a.onHold === 'Candidate' && (
-              <ActionButton onClick={() => approveLatestHold(data, refresh, setActionErr)}>
-                ✓ Approve Hold
-              </ActionButton>
-            )}
-            {a.onHold === 'Active' && (
-              <ActionButton onClick={() => releaseLatestHold(data, refresh, setActionErr)}>
-                ✕ Release Hold
-              </ActionButton>
-            )}
-            {!a.onHold && (
-              <ActionButton onClick={() => setModal('flag-hold')}>🚩 Flag Hold</ActionButton>
-            )}
-          </div>
-        )}
-
-        {actionErr && (
-          <div style={{
-            padding: '8px 28px', background: 'rgba(178,79,55,.10)',
-            color: 'var(--rust)', fontSize: 12, borderBottom: '1px solid var(--line, #e7eaf0)',
-          }}>{actionErr}</div>
-        )}
 
         {/* Tabs */}
         <nav style={{
           display: 'flex', borderBottom: '1px solid var(--line, #e7eaf0)',
-          padding: '0 16px',
+          padding: '0 18px', background: '#fff',
         }}>
-          {(['overview','timeline','contact','promises'] as const).map(t => {
+          {(['account','timeline','contact'] as const).map(t => {
             const active = tab === t;
-            const label = t === 'overview' ? 'Overview' : t === 'timeline' ? 'Timeline' : t === 'contact' ? 'Contact' : 'Promises';
+            const label = t === 'account' ? 'Account' : t === 'timeline' ? 'Timeline' : 'Contact';
             return (
-              <button
-                key={t}
-                onClick={() => setTab(t)}
-                style={{
-                  border: 'none', background: 'transparent', cursor: 'pointer',
-                  padding: '14px 16px', fontSize: 12, fontWeight: 600,
-                  letterSpacing: '.08em', textTransform: 'uppercase',
-                  color: active ? 'var(--navy-deep)' : 'var(--t-3)',
-                  borderBottom: active ? '2px solid var(--navy-deep)' : '2px solid transparent',
-                  marginBottom: -1,
-                }}
-              >{label}</button>
+              <button key={t} onClick={() => setTab(t)} style={{
+                border: 'none', background: 'transparent', cursor: 'pointer',
+                padding: '14px 18px', fontSize: 11, fontWeight: 700,
+                letterSpacing: '.22em', textTransform: 'uppercase',
+                color: active ? 'var(--navy-deep)' : 'var(--t-3)',
+                borderBottom: active ? '2px solid var(--navy-deep)' : '2px solid transparent',
+                marginBottom: -1,
+              }}>{label}</button>
             );
           })}
         </nav>
 
+        {actionErr && (
+          <div style={{
+            padding: '8px 26px', background: 'rgba(178,79,55,.10)',
+            color: 'var(--rust)', fontSize: 12, borderBottom: '1px solid var(--line, #e7eaf0)',
+          }}>{actionErr}</div>
+        )}
+
         {/* Body */}
-        <div className="scroll" style={{ flex: 1, overflowY: 'auto', padding: 24 }}>
-          {loading && <div style={{ color: 'var(--t-3)', padding: 24 }}>Loading…</div>}
-          {error && <div style={{ color: 'var(--rust)', padding: 24 }}>Failed: {error}</div>}
-          {data && tab === 'overview'  && <OverviewTab data={data} />}
-          {data && tab === 'timeline'  && <TimelineTab data={data} />}
-          {data && tab === 'contact'   && <ContactTab data={data} />}
-          {data && tab === 'promises'  && (
-            <PromisesTab
+        <div className="scroll" style={{ flex: 1, overflowY: 'auto', padding: 22, background: 'var(--paper, #F4F6FA)' }}>
+          {loading && <div style={{ color: 'var(--t-3)', padding: 16 }}>Loading…</div>}
+          {error && <div style={{ color: 'var(--rust)', padding: 16 }}>Failed: {error}</div>}
+          {data && tab === 'account' && (
+            <AccountTab
               data={data}
-              onSettleKept={(id) => { setSettlePromiseId(id); setModal('settle-promise'); }}
-              onMarkBroken={(id) => quickSettlePromise(id, 'Broken', refresh, setActionErr)}
-              onMarkCancelled={(id) => quickSettlePromise(id, 'Cancelled', refresh, setActionErr)}
+              onAction={(k) => setModal(k)}
+              onSettlePromise={(id) => { setSettlePromiseId(id); setModal('settle-promise'); }}
+              refresh={refresh}
+              setErr={setActionErr}
             />
           )}
+          {data && tab === 'timeline' && <TimelineTab data={data} />}
+          {data && tab === 'contact' && <ContactTab data={data} onAction={(k) => setModal(k)} />}
         </div>
       </aside>
 
-      {/* Modals — render last so they layer over the drawer */}
+      {/* Modals */}
       {modal === 'log-call' && a && (
-        <LogCallModal
-          party={a.party}
-          currentStatus={a.status}
-          currentNextFu={a.nextFu}
+        <LogCallModal party={a.party} currentStatus={a.status} currentNextFu={a.nextFu}
           onClose={() => setModal(null)}
-          onSaved={() => { setModal(null); refresh(); }}
-        />
+          onSaved={() => { setModal(null); refresh(); }} />
       )}
       {modal === 'add-promise' && a && (
-        <AddPromiseModal
-          party={a.party}
-          currentOutstanding={Number(a.bill || 0)}
+        <AddPromiseModal party={a.party} currentOutstanding={Number(a.bill || 0)}
           onClose={() => setModal(null)}
-          onSaved={() => { setModal(null); refresh(); }}
-        />
+          onSaved={() => { setModal(null); refresh(); }} />
       )}
       {modal === 'settle-promise' && settlePromiseId && data && (
-        <SettlePromiseModal
-          promise={data.promises.find(p => p.id === settlePromiseId)!}
+        <SettlePromiseModal promise={data.promises.find(p => p.id === settlePromiseId)!}
           onClose={() => { setModal(null); setSettlePromiseId(null); }}
-          onSaved={() => { setModal(null); setSettlePromiseId(null); refresh(); }}
-        />
+          onSaved={() => { setModal(null); setSettlePromiseId(null); refresh(); }} />
       )}
       {modal === 'flag-hold' && a && (
-        <FlagHoldModal
-          party={a.party}
-          currentOutstanding={Number(a.bill || 0)}
+        <FlagHoldModal party={a.party} currentOutstanding={Number(a.bill || 0)}
           onClose={() => setModal(null)}
-          onSaved={() => { setModal(null); refresh(); }}
-        />
+          onSaved={() => { setModal(null); refresh(); }} />
+      )}
+      {modal === 'credit' && a && accountId && (
+        <CreditModal accountId={accountId} account={a}
+          onClose={() => setModal(null)}
+          onSaved={() => { setModal(null); refresh(); }} />
+      )}
+      {modal === 'edit-history' && a && accountId && (
+        <HistoryModal accountId={accountId} initial={a.history || ''}
+          onClose={() => setModal(null)}
+          onSaved={() => { setModal(null); refresh(); }} />
       )}
     </>
   );
 }
 
-// ─── Module-local mutation helpers (used by inline buttons) ───
-async function quickSettlePromise(
-  id: string,
-  status: 'Broken' | 'Cancelled',
-  refresh: () => void,
-  setErr: (s: string | null) => void
-) {
+// ─── Tier dropdown ───────────────────────────────────────────
+function TierDropdown({ tier, open, onToggle, onPick }: {
+  tier: string; open: boolean; onToggle: () => void; onPick: (t: string) => void;
+}) {
+  return (
+    <div style={{ position: 'relative' }}>
+      <button onClick={onToggle} className={`tier tier-${tier}`} style={{
+        display: 'inline-flex', alignItems: 'center', gap: 4,
+        padding: '4px 10px', fontSize: 13, fontWeight: 700,
+        cursor: 'pointer', border: 'none',
+      }}>
+        {tier}
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+          <polyline points={open ? "18 15 12 9 6 15" : "6 9 12 15 18 9"} />
+        </svg>
+      </button>
+      {open && (
+        <div style={{
+          position: 'absolute', top: '100%', right: 0, marginTop: 6,
+          background: '#fff', border: '1px solid var(--line, #e7eaf0)',
+          borderRadius: 8, boxShadow: '0 10px 30px rgba(8,24,58,.18)',
+          minWidth: 180, padding: 6, zIndex: 110,
+        }}>
+          {(['A','B','C','D','E'] as const).map(t => (
+            <button key={t} onClick={() => onPick(t)} style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              width: '100%', background: 'transparent', border: 'none', cursor: 'pointer',
+              padding: '8px 10px', fontSize: 13, color: 'var(--t-1)',
+              borderRadius: 6, fontWeight: tier === t ? 700 : 500,
+              textAlign: 'left',
+            }}
+            onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-2, #f6f8fb)')}
+            onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
+              {TIER_LABEL[t]}
+              {tier === t && <span style={{ color: 'var(--sage)' }}>✓</span>}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Status pill row (top of header) ─────────────────────────
+function StatusPillRow({ account }: { account: any }) {
+  const pills: Array<{ label: string; tone: 'amber' | 'rust' | 'sage' | 'muted' }> = [];
+  if (account.status) {
+    pills.push({ label: account.status, tone: account.status === 'Legal' ? 'rust' : account.status === 'Doubtful' ? 'amber' : 'muted' });
+  }
+  if (account.onHold === 'Candidate') pills.push({ label: 'Candidate', tone: 'amber' });
+  if (account.onHold === 'Active')    pills.push({ label: 'On Hold',   tone: 'rust' });
+  if (account.alert)                  pills.push({ label: account.alert, tone: account.alert === 'On Hold' ? 'rust' : account.alert === 'Escalate' ? 'rust' : 'amber' });
+  if (pills.length === 0) return null;
+
+  const colorMap = {
+    amber: { bg: 'rgba(176,127,28,.15)', fg: 'var(--amber)' },
+    rust:  { bg: 'rgba(181,72,61,.15)',  fg: 'var(--rust)' },
+    sage:  { bg: 'rgba(46,125,92,.15)',  fg: 'var(--sage)' },
+    muted: { bg: 'rgba(100,116,139,.15)',fg: 'var(--t-2)' },
+  };
+
+  return (
+    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 10 }}>
+      {pills.map((p, i) => {
+        const c = colorMap[p.tone];
+        return (
+          <span key={i} style={{
+            background: c.bg, color: c.fg, fontSize: 10, fontWeight: 700,
+            letterSpacing: '.14em', textTransform: 'uppercase',
+            padding: '4px 9px', borderRadius: 5,
+          }}>{p.label}</span>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─── Account tab ─────────────────────────────────────────────
+function AccountTab({
+  data, onAction, onSettlePromise, refresh, setErr,
+}: {
+  data: DrawerData;
+  onAction: (k: ModalKind) => void;
+  onSettlePromise: (id: string) => void;
+  refresh: () => void;
+  setErr: (s: string | null) => void;
+}) {
+  const a = data.account;
+  const openPromises = data.promises.filter(p => p.status === 'Open');
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {/* Context section — colored left border depending on tier */}
+      {a.tier === 'E' && data.legalCase && (
+        <ContextCard tone="rust" title={`Legal case · ${data.legalCase.status}`}>
+          <LegalCaseDetails legal={data.legalCase} />
+        </ContextCard>
+      )}
+      {a.tier === 'D' && data.paymentPlan && (
+        <ContextCard tone="amber" title="Doubtful plan">
+          <PaymentPlanDetails plan={data.paymentPlan} instalments={data.instalments} />
+        </ContextCard>
+      )}
+      {(a.tier !== 'D' && a.tier !== 'E' && openPromises.length > 0) && (
+        <ContextCard tone="navy" title={`Promise history (${data.promises.length})`}>
+          <PromiseHistoryDetails promises={data.promises}
+            onSettleKept={onSettlePromise}
+            onMarkBroken={(id) => quickSettle(id, 'Broken', refresh, setErr)}
+            onMarkCancelled={(id) => quickSettle(id, 'Cancelled', refresh, setErr)}
+          />
+        </ContextCard>
+      )}
+
+      {/* OUTSTANDING + NEXT ACTION */}
+      <div style={{
+        display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16,
+        padding: '18px 20px', background: '#fff',
+        border: '1px solid var(--line, #e7eaf0)', borderRadius: 12,
+      }}>
+        <div>
+          <div style={{ fontSize: 10, letterSpacing: '.22em', textTransform: 'uppercase', color: 'var(--t-3)', fontWeight: 700, marginBottom: 6 }}>Outstanding</div>
+          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 26, fontWeight: 700, color: 'var(--navy-deep)', lineHeight: 1 }}>
+            {fmtINR(Number(a.bill || 0))}
+          </div>
+          <div style={{ fontSize: 11.5, color: 'var(--t-3)', marginTop: 6 }}>Across {a.exec || '—'}</div>
+        </div>
+        <div>
+          <div style={{ fontSize: 10, letterSpacing: '.22em', textTransform: 'uppercase', color: 'var(--t-3)', fontWeight: 700, marginBottom: 6 }}>Next action</div>
+          <NextActionLine account={a} />
+        </div>
+      </div>
+
+      {/* Aging row */}
+      <div style={{
+        display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 0,
+        padding: '14px 18px', background: '#fff',
+        border: '1px solid var(--line, #e7eaf0)', borderRadius: 12,
+      }}>
+        {[
+          { label: '≤ 30 d', value: a.d30 },
+          { label: '≤ 60 d', value: a.d60 },
+          { label: '≤ 90 d', value: a.d90 },
+          { label: '> 90 d', value: a.d90p },
+        ].map((b, i) => (
+          <div key={b.label} style={{
+            paddingLeft: i === 0 ? 0 : 14,
+            borderLeft: i === 0 ? 'none' : '1px solid var(--line, #e7eaf0)',
+          }}>
+            <div style={{ fontSize: 9.5, letterSpacing: '.22em', textTransform: 'uppercase', color: 'var(--t-3)', fontWeight: 700, marginBottom: 6 }}>{b.label}</div>
+            <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 14, fontWeight: 600, color: Number(b.value) === 0 ? 'var(--t-3)' : 'var(--navy-deep)' }}>{fmtINR(Number(b.value || 0))}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* 4 round action buttons */}
+      <div style={{
+        display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10,
+        padding: '18px 18px', background: '#fff',
+        border: '1px solid var(--line, #e7eaf0)', borderRadius: 12,
+      }}>
+        <RoundAction icon={<PhoneIcon />}    label="Log Call" onClick={() => onAction('log-call')} />
+        <RoundAction icon={<CheckIcon />}    label="Paid"     onClick={() => onAction('mark-paid')} />
+        <RoundAction icon={<HoldIcon />}     label="On Hold"  onClick={() => onAction('flag-hold')} active={!!a.onHold} />
+        <RoundAction icon={<CardIcon />}     label="Credit"   onClick={() => onAction('credit')} />
+      </div>
+
+      {/* Add phone | Add WhatsApp */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+        <ContactQuickBtn icon={<PhoneSmIcon />} label={data.client?.phone1 ? `Call ${data.client.phone1}` : 'Add phone'}
+          onClick={() => {
+            if (data.client?.phone1) window.location.href = `tel:${data.client.phone1}`;
+            else onAction('edit-contact');
+          }} />
+        <ContactQuickBtn icon={<ChatIcon />} label={data.client?.whatsapp ? 'Open WhatsApp' : 'Add WhatsApp'}
+          onClick={() => {
+            if (data.client?.whatsapp) window.open(`https://wa.me/${data.client.whatsapp.replace(/\D/g,'')}`, '_blank');
+            else onAction('edit-contact');
+          }} />
+      </div>
+
+      {/* Add Promise inline (since promises section moved to context card) */}
+      <button onClick={() => onAction('add-promise')} style={{
+        background: 'transparent', border: '1px dashed var(--line-2)',
+        color: 'var(--t-2)', borderRadius: 10, padding: '12px 14px',
+        fontSize: 12, fontWeight: 600, cursor: 'pointer',
+        letterSpacing: '.04em',
+      }}
+      onMouseEnter={e => (e.currentTarget.style.background = '#fff')}
+      onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
+        ＋ Add new promise
+      </button>
+
+      {/* ESCALATION */}
+      <Section title="Escalation">
+        <KV label="Stage" value={a.stage || '—'} />
+        <KV label="Recent call" value={a.recentCall ? `${fmtDate(a.recentCall)} (${fmtRelative(a.recentCall)})` : '—'} />
+        <KV label="Call outcome" value={a.callOutcome || '—'} />
+        <KV
+          label="Next follow-up"
+          value={a.nextFu ? fmtDate(a.nextFu) : '—'}
+          pill={a.nextFu && new Date(a.nextFu) < new Date() ? { label: 'OVERDUE', tone: 'rust' } : null}
+        />
+        <KV
+          label="Pay expected"
+          value={a.payExpected ? fmtDate(a.payExpected) : '—'}
+          pill={a.payExpected && new Date(a.payExpected) < new Date() ? { label: 'OVERDUE', tone: 'rust' } : null}
+        />
+      </Section>
+
+      {/* HISTORY (freeform) */}
+      <Section
+        title="History"
+        action={<button onClick={() => onAction('edit-history')} aria-label="Edit history" style={{
+          background: 'transparent', border: 'none', cursor: 'pointer',
+          color: 'var(--t-3)', padding: 4,
+        }}><PencilIcon /></button>}
+      >
+        {a.history ? (
+          <pre style={{
+            margin: 0, fontFamily: 'inherit', fontSize: 13, lineHeight: 1.55,
+            color: 'var(--t-2)', whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+          }}>{a.history}</pre>
+        ) : (
+          <div style={{ color: 'var(--t-3)', fontSize: 13, fontStyle: 'italic' }}>No history yet.</div>
+        )}
+      </Section>
+    </div>
+  );
+}
+
+// ─── Context card (Legal / Doubtful / Promise) ───────────────
+function ContextCard({ tone, title, children }: {
+  tone: 'rust' | 'amber' | 'navy';
+  title: string;
+  children: React.ReactNode;
+}) {
+  const colorMap = {
+    rust:  'var(--rust)',
+    amber: 'var(--amber)',
+    navy:  'var(--navy)',
+  };
+  return (
+    <div style={{
+      background: '#fff', border: '1px solid var(--line, #e7eaf0)',
+      borderLeft: `4px solid ${colorMap[tone]}`,
+      borderRadius: 10, padding: '16px 18px',
+    }}>
+      <div style={{
+        fontSize: 10, letterSpacing: '.22em', textTransform: 'uppercase',
+        color: colorMap[tone], fontWeight: 700, marginBottom: 12,
+      }}>{title}</div>
+      {children}
+    </div>
+  );
+}
+
+function LegalCaseDetails({ legal }: { legal: any }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <KV label="Status" value={legal.status} />
+      {legal.lawyer && <KV label="Lawyer" value={legal.lawyer} />}
+      {legal.caseRef && <KV label="Reference" value={legal.caseRef} />}
+      {legal.nextHearing && <KV label="Next hearing" value={fmtDate(legal.nextHearing)} />}
+      {legal.notes && (
+        <div>
+          <div style={{ fontSize: 10, letterSpacing: '.18em', textTransform: 'uppercase', color: 'var(--t-3)', fontWeight: 700, marginBottom: 4 }}>Notes</div>
+          <div style={{ fontSize: 13, color: 'var(--t-2)', lineHeight: 1.55 }}>{legal.notes}</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PaymentPlanDetails({ plan, instalments }: { plan: any; instalments: any[] }) {
+  const received = instalments.reduce((n, i) => n + Number(i.received || 0), 0);
+  const total = Number(plan.planTotal);
+  const remaining = total - received;
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
+        <KvBlock label="Plan total" value={fmtINR(total)} />
+        <KvBlock label="Received so far" value={fmtINR(received)} color="sage" />
+        <KvBlock label="Remaining" value={fmtINR(remaining)} color={remaining > 0 ? 'rust' : 'sage'} />
+      </div>
+      <div style={{ marginTop: 4 }}>
+        <div style={{ fontSize: 10, letterSpacing: '.18em', textTransform: 'uppercase', color: 'var(--t-3)', fontWeight: 700, marginBottom: 8 }}>Instalment schedule</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {instalments.map(i => (
+            <div key={i.id} style={{
+              display: 'grid', gridTemplateColumns: '40px 1fr 90px 90px',
+              gap: 12, alignItems: 'center', fontSize: 12,
+              padding: '6px 0', borderBottom: '1px dashed var(--line, #e7eaf0)',
+            }}>
+              <div style={{ fontWeight: 600, color: 'var(--navy-deep)' }}>{i.instNo}/{instalments.length}</div>
+              <div style={{ color: 'var(--t-3)' }}>due {fmtDate(i.dueDate)}</div>
+              <div style={{ fontFamily: "'JetBrains Mono', monospace", textAlign: 'right' }}>{fmtINR(Number(i.amount))}</div>
+              <div style={{ textAlign: 'right' }}><MiniPill status={i.status} /></div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PromiseHistoryDetails({
+  promises, onSettleKept, onMarkBroken, onMarkCancelled,
+}: {
+  promises: any[];
+  onSettleKept: (id: string) => void;
+  onMarkBroken: (id: string) => void;
+  onMarkCancelled: (id: string) => void;
+}) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      {promises.slice(0, 6).map(p => (
+        <div key={p.id}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 }}>
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--navy-deep)' }}>
+                Expected {fmtDate(p.expectedBy)}
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--t-3)' }}>
+                logged {fmtDate(p.loggedAt)}{p.exec ? ` · ${p.exec}` : ''}
+              </div>
+            </div>
+            <MiniPill status={p.status} />
+          </div>
+          {p.notes && <div style={{ fontSize: 12, color: 'var(--t-2)', marginTop: 2 }}>{p.notes}</div>}
+          {p.status === 'Open' && (
+            <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+              <InlineBtn color="sage"  onClick={() => onSettleKept(p.id)}>Mark Kept</InlineBtn>
+              <InlineBtn color="rust"  onClick={() => onMarkBroken(p.id)}>Mark Broken</InlineBtn>
+              <InlineBtn color="muted" onClick={() => onMarkCancelled(p.id)}>Cancel</InlineBtn>
+            </div>
+          )}
+        </div>
+      ))}
+      <div style={{ fontSize: 11, color: 'var(--t-3)', fontStyle: 'italic', borderTop: '1px dashed var(--line, #e7eaf0)', paddingTop: 8 }}>
+        Use "Log Call" above to add a new promise. Set status here as the outcome comes in.
+      </div>
+    </div>
+  );
+}
+
+// ─── Round action button ─────────────────────────────────────
+function RoundAction({ icon, label, onClick, active }: {
+  icon: React.ReactNode; label: string; onClick: () => void; active?: boolean;
+}) {
+  return (
+    <button onClick={onClick} style={{
+      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8,
+      background: 'transparent', border: 'none', cursor: 'pointer',
+      padding: '4px 0',
+    }}>
+      <span style={{
+        width: 48, height: 48, borderRadius: '50%',
+        background: active ? 'var(--rust)' : 'var(--navy-deep)',
+        color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
+        transition: 'transform .12s ease, background .12s ease',
+      }}>{icon}</span>
+      <span style={{
+        fontSize: 10, fontWeight: 700, letterSpacing: '.18em',
+        textTransform: 'uppercase', color: 'var(--t-2)',
+      }}>{label}</span>
+    </button>
+  );
+}
+
+function ContactQuickBtn({ icon, label, onClick }: { icon: React.ReactNode; label: string; onClick: () => void }) {
+  return (
+    <button onClick={onClick} style={{
+      display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+      background: '#fff', border: '1px solid var(--line, #e7eaf0)',
+      borderRadius: 10, padding: '12px 14px',
+      fontSize: 12, fontWeight: 600, cursor: 'pointer', color: 'var(--t-2)',
+    }}
+    onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-2, #f6f8fb)')}
+    onMouseLeave={e => (e.currentTarget.style.background = '#fff')}>
+      {icon}{label}
+    </button>
+  );
+}
+
+// ─── Section wrapper ─────────────────────────────────────────
+function Section({ title, action, children }: { title: string; action?: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <section style={{
+      background: '#fff', border: '1px solid var(--line, #e7eaf0)',
+      borderRadius: 12, padding: '14px 18px',
+    }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+        <div style={{ fontSize: 10, letterSpacing: '.22em', textTransform: 'uppercase', color: 'var(--t-3)', fontWeight: 700 }}>{title}</div>
+        {action}
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>{children}</div>
+    </section>
+  );
+}
+
+function KV({ label, value, pill }: { label: string; value: string; pill?: { label: string; tone: 'rust' | 'amber' | 'sage' } | null }) {
+  const pillColor = pill ? (pill.tone === 'rust' ? 'var(--rust)' : pill.tone === 'amber' ? 'var(--amber)' : 'var(--sage)') : null;
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 13 }}>
+      <span style={{ color: 'var(--t-3)' }}>{label}</span>
+      <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={{ color: 'var(--navy-deep)' }}>{value}</span>
+        {pill && pillColor && (
+          <span style={{
+            background: `${pillColor}1a`, color: pillColor,
+            fontSize: 9, fontWeight: 700, letterSpacing: '.14em', textTransform: 'uppercase',
+            padding: '2px 6px', borderRadius: 4,
+          }}>{pill.label}</span>
+        )}
+      </span>
+    </div>
+  );
+}
+
+function KvBlock({ label, value, color }: { label: string; value: string; color?: 'rust' | 'sage' }) {
+  const c = color === 'rust' ? 'var(--rust)' : color === 'sage' ? 'var(--sage)' : 'var(--navy-deep)';
+  return (
+    <div>
+      <div style={{ fontSize: 9.5, letterSpacing: '.18em', textTransform: 'uppercase', color: 'var(--t-3)', fontWeight: 700, marginBottom: 4 }}>{label}</div>
+      <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 14, fontWeight: 600, color: c }}>{value}</div>
+    </div>
+  );
+}
+
+function MiniPill({ status }: { status: string }) {
+  const map: Record<string, { bg: string; fg: string }> = {
+    Open:      { bg: 'rgba(176,127,28,.15)', fg: 'var(--amber)' },
+    Kept:      { bg: 'rgba(46,125,92,.15)',  fg: 'var(--sage)' },
+    Broken:    { bg: 'rgba(181,72,61,.15)',  fg: 'var(--rust)' },
+    Cancelled: { bg: 'rgba(100,116,139,.15)',fg: 'var(--t-2)' },
+    Pending:   { bg: 'rgba(176,127,28,.15)', fg: 'var(--amber)' },
+    Received:  { bg: 'rgba(46,125,92,.15)',  fg: 'var(--sage)' },
+  };
+  const s = map[status] || map.Pending;
+  return (
+    <span style={{
+      background: s.bg, color: s.fg, fontSize: 9.5, fontWeight: 700,
+      letterSpacing: '.14em', textTransform: 'uppercase',
+      padding: '3px 8px', borderRadius: 5, whiteSpace: 'nowrap',
+    }}>{status}</span>
+  );
+}
+
+function InlineBtn({ color, children, onClick }: { color: 'sage' | 'rust' | 'muted'; children: React.ReactNode; onClick: () => void }) {
+  const map = {
+    sage:  { bg: 'rgba(46,125,92,.12)',  fg: 'var(--sage)' },
+    rust:  { bg: 'rgba(181,72,61,.12)',  fg: 'var(--rust)' },
+    muted: { bg: 'rgba(100,116,139,.12)',fg: 'var(--t-2)' },
+  } as const;
+  const c = map[color];
+  return (
+    <button onClick={onClick} style={{
+      background: c.bg, color: c.fg, border: 'none', borderRadius: 5,
+      padding: '4px 9px', fontSize: 10, fontWeight: 700,
+      letterSpacing: '.08em', textTransform: 'uppercase', cursor: 'pointer',
+    }}>{children}</button>
+  );
+}
+
+function NextActionLine({ account }: { account: any }) {
+  const a = account;
+  if (a.nextFu && new Date(a.nextFu) < new Date()) {
+    return (
+      <div>
+        <div style={{ fontSize: 14, color: 'var(--rust)', fontWeight: 600 }}>Follow-up overdue ({fmtDate(a.nextFu)})</div>
+        <div style={{ fontSize: 11, color: 'var(--t-3)', marginTop: 2 }}>
+          {a.recentCall ? `Last call · ${fmtDate(a.recentCall)}` : 'No calls yet'}
+        </div>
+      </div>
+    );
+  }
+  if (a.nextFu) {
+    return (
+      <div>
+        <div style={{ fontSize: 14, color: 'var(--navy-deep)', fontWeight: 600 }}>Follow-up by {fmtDate(a.nextFu)}</div>
+        <div style={{ fontSize: 11, color: 'var(--t-3)', marginTop: 2 }}>
+          {a.recentCall ? `Last call · ${fmtDate(a.recentCall)}` : 'No calls yet'}
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div>
+      <div style={{ fontSize: 14, color: 'var(--t-2)', fontWeight: 600 }}>No calls yet — make first contact</div>
+    </div>
+  );
+}
+
+// ─── Timeline tab ────────────────────────────────────────────
+function TimelineTab({ data }: { data: DrawerData }) {
+  if (data.history.length === 0) {
+    return <Empty label="No timeline entries yet" />;
+  }
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {data.history.map(h => (
+        <div key={h.id} style={{
+          padding: 14, borderRadius: 10, border: '1px solid var(--line, #e7eaf0)',
+          background: '#fff',
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+            <div style={{ fontWeight: 600, color: 'var(--navy-deep)', fontSize: 13 }}>{h.action}</div>
+            <div style={{ fontSize: 11, color: 'var(--t-3)' }}>{fmtDateTime(h.ts)}</div>
+          </div>
+          {h.oldValue && h.newValue && (
+            <div style={{ fontSize: 12, color: 'var(--t-3)' }}>
+              <span style={{ textDecoration: 'line-through' }}>{h.oldValue}</span>
+              {' → '}
+              <span style={{ color: 'var(--t-2)', fontWeight: 600 }}>{h.newValue}</span>
+            </div>
+          )}
+          {h.newValue && !h.oldValue && <div style={{ fontSize: 12, color: 'var(--t-2)' }}>{h.newValue}</div>}
+          {h.exec && <div style={{ fontSize: 11, color: 'var(--t-3)', marginTop: 4 }}>by {h.exec}</div>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ─── Contact tab ─────────────────────────────────────────────
+function ContactTab({ data, onAction }: { data: DrawerData; onAction: (k: ModalKind) => void }) {
+  const c = data.client;
+  if (!c) {
+    return (
+      <div style={{ padding: 16 }}>
+        <Empty label="No client master record" />
+      </div>
+    );
+  }
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <Section title="Contact details" action={
+        <button onClick={() => onAction('edit-contact')} style={{ background:'transparent', border:'none', cursor:'pointer', color:'var(--t-3)', padding:4 }} aria-label="Edit"><PencilIcon /></button>
+      }>
+        <KV label="Phone"    value={c.phone1 || '—'} />
+        <KV label="Phone 2"  value={c.phone2 || '—'} />
+        <KV label="WhatsApp" value={c.whatsapp || '—'} />
+        <KV label="Email"    value={c.email || '—'} />
+      </Section>
+      <Section title="Stakeholders">
+        <KV label="Owner" value={c.owner || '—'} />
+        <KV label="AP"    value={c.ap || '—'} />
+        <KV label="Admin" value={c.admin || '—'} />
+        <KV label="VIP"   value={c.vip || '—'} pill={c.vip === 'YES' ? { label: 'VIP', tone: 'amber' } : null} />
+      </Section>
+      {c.address && (
+        <Section title="Address">
+          <div style={{ fontSize: 13, color: 'var(--t-2)', whiteSpace: 'pre-wrap' }}>{c.address}</div>
+        </Section>
+      )}
+    </div>
+  );
+}
+
+function Empty({ label }: { label: string }) {
+  return <div style={{ padding: '32px 0', textAlign: 'center', color: 'var(--t-3)', fontSize: 13 }}>{label}</div>;
+}
+
+// ─── Module helpers (used by inline buttons / hold actions) ──
+async function quickSettle(id: string, status: 'Broken' | 'Cancelled', refresh: () => void, setErr: (s: string | null) => void) {
   if (!window.confirm(`Mark this promise as ${status}?`)) return;
   setErr(null);
   try {
@@ -265,298 +831,74 @@ async function quickSettlePromise(
   } catch (e: any) { setErr(e.message); }
 }
 
-async function approveLatestHold(
-  data: DrawerData,
-  refresh: () => void,
-  setErr: (s: string | null) => void
-) {
-  const candidate = data.holds.find(h => h.status === 'Candidate');
-  if (!candidate) { setErr('No candidate hold to approve'); return; }
-  if (!window.confirm('Approve this hold? Bookings for this account will be blocked.')) return;
-  setErr(null);
-  try {
-    const r = await fetch(`/api/holds/${encodeURIComponent(candidate.id)}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: 'Active' }),
-    }).then(x => x.json());
-    if (!r?.ok) throw new Error(r?.error || 'Failed');
-    refresh();
-  } catch (e: any) { setErr(e.message); }
-}
-
-async function releaseLatestHold(
-  data: DrawerData,
-  refresh: () => void,
-  setErr: (s: string | null) => void
-) {
-  const active = data.holds.find(h => h.status === 'Active');
-  if (!active) { setErr('No active hold to release'); return; }
-  const note = window.prompt('Release reason (optional):') || undefined;
-  if (note === undefined && !window.confirm('Release this hold without a note?')) return;
-  setErr(null);
-  try {
-    const r = await fetch(`/api/holds/${encodeURIComponent(active.id)}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: 'Released', note }),
-    }).then(x => x.json());
-    if (!r?.ok) throw new Error(r?.error || 'Failed');
-    refresh();
-  } catch (e: any) { setErr(e.message); }
-}
-
-// ─── Overview tab ─────────────────────────────────────────────
-function OverviewTab({ data }: { data: DrawerData }) {
-  const a = data.account;
-  const lastHold = data.holds[0];
+// ─── Icons ───────────────────────────────────────────────────
+function PhoneIcon() {
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-      {/* Hero — outstanding + tier */}
-      <div style={{
-        background: 'linear-gradient(135deg, #0b1629 0%, #1a2540 100%)',
-        color: '#fff', borderRadius: 12, padding: '20px 22px',
-      }}>
-        <div style={{ fontSize: 10, letterSpacing: '.22em', textTransform: 'uppercase', opacity: .7, marginBottom: 8 }}>Outstanding</div>
-        <div style={{ fontSize: 28, fontWeight: 600, fontFamily: "'JetBrains Mono', monospace", marginBottom: 10 }}>{fmtINR(Number(a.bill))}</div>
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center', fontSize: 11, opacity: .8 }}>
-          <TierBadge tier={a.tier} /> · <TierLabel tier={a.tier} /> · {a.exec || 'no exec'}
-        </div>
-      </div>
-
-      {/* Aging row */}
-      <Card title="Aging">
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 10 }}>
-          {[
-            { l: '≤30d', v: a.d30 }, { l: '≤60d', v: a.d60 },
-            { l: '≤90d', v: a.d90 }, { l: '>90d', v: a.d90p },
-          ].map(b => (
-            <div key={b.l}>
-              <div style={{ fontSize: 9.5, letterSpacing: '.22em', textTransform: 'uppercase', color: 'var(--t-3)', fontWeight: 700, marginBottom: 4 }}>{b.l}</div>
-              <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, color: 'var(--navy-deep)', fontWeight: 600 }}>{fmtINR(Number(b.v))}</div>
-            </div>
-          ))}
-        </div>
-      </Card>
-
-      {/* Status row */}
-      <Card title="Status">
-        <KV label="On Hold"      value={a.onHold || '—'}  pill={a.onHold === 'Active' ? 'rust' : a.onHold === 'Candidate' ? 'amber' : null} />
-        <KV label="Alert"        value={a.alert || '—'} />
-        <KV label="Stage"        value={a.stage || '—'} />
-        <KV label="Next Follow"  value={a.nextFu ? fmtDate(a.nextFu) : '—'} />
-        <KV label="Last Touched" value={a.lastTouched ? fmtRelative(a.lastTouched) : '—'} />
-        {lastHold && (
-          <KV label="Hold Reason" value={lastHold.reason || '—'} />
-        )}
-      </Card>
-
-      {/* Credit policy */}
-      <Card title="Credit policy">
-        <KV label="Limit"   value={fmtINR(Number(a.creditLimit || 0))} />
-        <KV label="Terms"   value={a.creditPeriod || '—'} />
-        <KV label="On-Time" value={a.onTimePct || '—'} />
-      </Card>
-    </div>
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.37 1.9.72 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.35 1.85.59 2.81.72A2 2 0 0 1 22 16.92z" />
+    </svg>
+  );
+}
+function CheckIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="20 6 9 17 4 12" />
+    </svg>
+  );
+}
+function HoldIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="6" y="4" width="4" height="16" />
+      <rect x="14" y="4" width="4" height="16" />
+    </svg>
+  );
+}
+function CardIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="2" y="6" width="20" height="14" rx="2" />
+      <line x1="2" y1="11" x2="22" y2="11" />
+    </svg>
+  );
+}
+function PhoneSmIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.37 1.9.72 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.35 1.85.59 2.81.72A2 2 0 0 1 22 16.92z" />
+    </svg>
+  );
+}
+function ChatIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
+    </svg>
+  );
+}
+function PencilIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 20h9" />
+      <path d="M16.5 3.5a2.12 2.12 0 1 1 3 3L7 19l-4 1 1-4z" />
+    </svg>
   );
 }
 
-// ─── Timeline tab ─────────────────────────────────────────────
-function TimelineTab({ data }: { data: DrawerData }) {
-  if (data.history.length === 0) {
-    return <Empty label="No timeline entries yet" />;
-  }
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-      {data.history.map(h => (
-        <div key={h.id} style={{
-          padding: 14, borderRadius: 10, border: '1px solid var(--line, #e7eaf0)',
-          background: 'var(--bg-1, #fff)',
-        }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-            <div style={{ fontWeight: 600, color: 'var(--navy-deep)', fontSize: 13 }}>{h.action}</div>
-            <div style={{ fontSize: 11, color: 'var(--t-3)' }}>{fmtDateTime(h.ts)}</div>
-          </div>
-          {h.newValue && <div style={{ fontSize: 12, color: 'var(--t-2)' }}>{h.newValue}</div>}
-          {h.exec && <div style={{ fontSize: 11, color: 'var(--t-3)', marginTop: 4 }}>by {h.exec}</div>}
-        </div>
-      ))}
-    </div>
-  );
-}
-
-// ─── Contact tab ──────────────────────────────────────────────
-function ContactTab({ data }: { data: DrawerData }) {
-  const c = data.client;
-  if (!c) return <Empty label="No client master record" />;
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-      <Card title="Contact details">
-        <KV label="Phone"    value={c.phone1 || '—'} />
-        <KV label="Phone 2"  value={c.phone2 || '—'} />
-        <KV label="WhatsApp" value={c.whatsapp || '—'} />
-        <KV label="Email"    value={c.email || '—'} />
-      </Card>
-      <Card title="Stakeholders">
-        <KV label="Owner" value={c.owner || '—'} />
-        <KV label="AP"    value={c.ap || '—'} />
-        <KV label="Admin" value={c.admin || '—'} />
-        <KV label="VIP"   value={c.vip || '—'} pill={c.vip === 'YES' ? 'amber' : null} />
-      </Card>
-      {c.address && (
-        <Card title="Address">
-          <div style={{ fontSize: 13, color: 'var(--t-2)', whiteSpace: 'pre-wrap' }}>{c.address}</div>
-        </Card>
-      )}
-    </div>
-  );
-}
-
-// ─── Promises tab ─────────────────────────────────────────────
-function PromisesTab({
-  data, onSettleKept, onMarkBroken, onMarkCancelled,
-}: {
-  data: DrawerData;
-  onSettleKept: (id: string) => void;
-  onMarkBroken: (id: string) => void;
-  onMarkCancelled: (id: string) => void;
-}) {
-  if (data.promises.length === 0) {
-    return <Empty label="No promises logged" />;
-  }
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-      {data.promises.map(p => (
-        <div key={p.id} style={{
-          padding: 14, borderRadius: 10, border: '1px solid var(--line, #e7eaf0)',
-          background: 'var(--bg-1, #fff)',
-        }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
-            <div>
-              <div style={{ fontWeight: 600, color: 'var(--navy-deep)', fontSize: 13 }}>
-                {fmtINR(Number(p.outstandingAt))} by {fmtDate(p.expectedBy)}
-              </div>
-              {p.exec && <div style={{ fontSize: 11, color: 'var(--t-3)' }}>logged by {p.exec}</div>}
-            </div>
-            <PromisePill status={p.status} />
-          </div>
-          {p.notes && <div style={{ fontSize: 12, color: 'var(--t-2)', marginTop: 4 }}>{p.notes}</div>}
-          {p.settledOn && <div style={{ fontSize: 11, color: 'var(--t-3)', marginTop: 4 }}>settled {fmtDate(p.settledOn)} · ₹{Number(p.amountReceived).toLocaleString('en-IN')} received</div>}
-
-          {/* Inline lifecycle actions — Open promises only */}
-          {p.status === 'Open' && (
-            <div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
-              <InlineBtn color="sage" onClick={() => onSettleKept(p.id)}>Mark Kept</InlineBtn>
-              <InlineBtn color="rust" onClick={() => onMarkBroken(p.id)}>Mark Broken</InlineBtn>
-              <InlineBtn color="muted" onClick={() => onMarkCancelled(p.id)}>Cancel</InlineBtn>
-            </div>
-          )}
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function InlineBtn({
-  color, children, onClick,
-}: { color: 'sage' | 'rust' | 'muted'; children: React.ReactNode; onClick: () => void }) {
-  const map = {
-    sage:  { bg: 'rgba(83,127,107,.12)',  fg: 'var(--sage)' },
-    rust:  { bg: 'rgba(178,79,55,.12)',   fg: 'var(--rust)' },
-    muted: { bg: 'rgba(120,130,150,.12)', fg: 'var(--t-2)' },
-  } as const;
-  const c = map[color];
-  return (
-    <button onClick={onClick} style={{
-      background: c.bg, color: c.fg, border: 'none', borderRadius: 6,
-      padding: '5px 10px', fontSize: 10.5, fontWeight: 700,
-      letterSpacing: '.08em', textTransform: 'uppercase', cursor: 'pointer',
-    }}>{children}</button>
-  );
-}
-
-// ─── Tiny shared bits ─────────────────────────────────────────
-function Card({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <section style={{
-      border: '1px solid var(--line, #e7eaf0)', borderRadius: 12,
-      padding: '14px 16px', background: 'var(--bg-1, #fff)',
-    }}>
-      <div style={{ fontSize: 10, letterSpacing: '.22em', textTransform: 'uppercase', color: 'var(--t-3)', fontWeight: 700, marginBottom: 10 }}>{title}</div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>{children}</div>
-    </section>
-  );
-}
-
-function KV({ label, value, pill }: { label: string; value: string; pill?: 'rust' | 'amber' | 'sage' | null }) {
-  const pillColor = pill === 'rust' ? 'var(--rust)' : pill === 'amber' ? 'var(--amber)' : pill === 'sage' ? 'var(--sage)' : null;
-  return (
-    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 13 }}>
-      <span style={{ color: 'var(--t-3)' }}>{label}</span>
-      <span style={{ color: pillColor || 'var(--navy-deep)', fontWeight: pill ? 600 : 500 }}>{value}</span>
-    </div>
-  );
-}
-
-function Empty({ label }: { label: string }) {
-  return <div style={{ padding: '40px 0', textAlign: 'center', color: 'var(--t-3)', fontSize: 13 }}>{label}</div>;
-}
-
-function PromisePill({ status }: { status: string }) {
-  const map: Record<string, { bg: string; fg: string }> = {
-    Open:      { bg: 'rgba(217,165,69,.18)',  fg: 'var(--amber)' },
-    Kept:      { bg: 'rgba(83,127,107,.18)',  fg: 'var(--sage)' },
-    Broken:    { bg: 'rgba(178,79,55,.18)',   fg: 'var(--rust)' },
-    Cancelled: { bg: 'rgba(120,130,150,.18)', fg: 'var(--t-2)' },
-  };
-  const s = map[status] || map.Open;
-  return (
-    <span style={{
-      background: s.bg, color: s.fg, fontSize: 10, fontWeight: 700,
-      letterSpacing: '.12em', textTransform: 'uppercase',
-      padding: '3px 8px', borderRadius: 6,
-    }}>{status}</span>
-  );
-}
-
-// ─── Action button (in the action bar) ────────────────────────
-function ActionButton({ children, onClick }: { children: React.ReactNode; onClick: () => void }) {
-  return (
-    <button
-      onClick={onClick}
-      style={{
-        background: 'var(--bg-1, #fff)', color: 'var(--navy-deep)',
-        border: '1px solid var(--line, #e7eaf0)', borderRadius: 8,
-        padding: '8px 14px', fontSize: 12, fontWeight: 600,
-        cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6,
-        transition: 'background .12s ease',
-      }}
-      onMouseEnter={e => (e.currentTarget.style.background = '#eef2f8')}
-      onMouseLeave={e => (e.currentTarget.style.background = 'var(--bg-1, #fff)')}
-    >{children}</button>
-  );
-}
-
-// ─── Generic modal shell ──────────────────────────────────────
-function ModalShell({
-  title, onClose, children, footer,
-}: { title: string; onClose: () => void; children: React.ReactNode; footer: React.ReactNode }) {
-  // Close on Esc
+// ─── Generic modal shell ─────────────────────────────────────
+function ModalShell({ title, onClose, children, footer }: { title: string; onClose: () => void; children: React.ReactNode; footer: React.ReactNode }) {
   useEffect(() => {
     const k = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
     window.addEventListener('keydown', k);
     return () => window.removeEventListener('keydown', k);
   }, [onClose]);
-
   return (
     <>
-      <div onClick={onClose} style={{
-        position: 'fixed', inset: 0, background: 'rgba(11,22,41,.55)', zIndex: 200,
-      }} />
+      <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(8,24,58,.55)', zIndex: 200 }} />
       <div role="dialog" style={{
         position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
-        width: 'min(480px, 92vw)', background: 'var(--bg-1, #fff)',
-        borderRadius: 14, boxShadow: '0 20px 60px rgba(11,22,41,.35)',
+        width: 'min(480px, 92vw)', background: '#fff',
+        borderRadius: 14, boxShadow: '0 30px 80px rgba(8,24,58,.35)',
         zIndex: 201, display: 'flex', flexDirection: 'column',
         maxHeight: '90vh', overflow: 'hidden',
       }}>
@@ -564,49 +906,37 @@ function ModalShell({
           padding: '18px 22px', borderBottom: '1px solid var(--line, #e7eaf0)',
           display: 'flex', justifyContent: 'space-between', alignItems: 'center',
         }}>
-          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600, color: 'var(--navy-deep)' }}>{title}</h3>
-          <button onClick={onClose} aria-label="Close" style={{
-            border: 'none', background: 'transparent', cursor: 'pointer',
-            fontSize: 20, color: 'var(--t-2)', lineHeight: 1,
-          }}>×</button>
+          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: 'var(--navy-deep)' }}>{title}</h3>
+          <button onClick={onClose} aria-label="Close" style={{ border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 20, color: 'var(--t-2)', lineHeight: 1 }}>×</button>
         </header>
         <div style={{ padding: 22, overflowY: 'auto', flex: 1 }}>{children}</div>
-        <footer style={{
-          padding: '14px 22px', borderTop: '1px solid var(--line, #e7eaf0)',
-          background: 'var(--bg-2, #f6f8fb)',
-          display: 'flex', justifyContent: 'flex-end', gap: 8,
-        }}>{footer}</footer>
+        <footer style={{ padding: '14px 22px', borderTop: '1px solid var(--line, #e7eaf0)', background: 'var(--bg-2, #f6f8fb)', display: 'flex', justifyContent: 'flex-end', gap: 8 }}>{footer}</footer>
       </div>
     </>
   );
 }
 
-// ─── Log Call modal ───────────────────────────────────────────
+// ─── Log Call modal (matches old portal layout) ──────────────
 const CALL_OUTCOMES = [
-  'Spoke to AP',
+  'Spoke to AP — no commitment',
+  'Spoke to AP — promise received',
   'Spoke to Owner',
   'Voicemail / no answer',
   'Payment confirmed',
-  'Promise received',
   'Escalation note sent',
   'WhatsApp sent',
   'Email sent',
   'Other',
 ];
 
-function LogCallModal({
-  party, currentStatus, currentNextFu, onClose, onSaved,
-}: {
-  party: string;
-  currentStatus: string | null;
-  currentNextFu: string | null;
-  onClose: () => void;
-  onSaved: () => void;
+function LogCallModal({ party, currentStatus, currentNextFu, onClose, onSaved }: {
+  party: string; currentStatus: string | null; currentNextFu: string | null; onClose: () => void; onSaved: () => void;
 }) {
   const [outcome, setOutcome] = useState(CALL_OUTCOMES[0]);
-  const [note, setNote] = useState('');
+  const [status, setStatus] = useState(currentStatus || 'Pending');
   const [nextFu, setNextFu] = useState(currentNextFu ? currentNextFu.slice(0, 10) : '');
-  const [status, setStatus] = useState(currentStatus || '');
+  const [promiseBy, setPromiseBy] = useState('');
+  const [note, setNote] = useState('');
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -617,63 +947,62 @@ function LogCallModal({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          party, outcome, note: note || undefined,
-          nextFu: nextFu || undefined, status: status || undefined,
+          party, outcome, status, note: note || undefined,
+          nextFu: nextFu || undefined,
         }),
       }).then(x => x.json());
       if (!r?.ok) throw new Error(r?.error || 'Failed to log call');
+
+      // If user entered a promise-by date, also create a promise
+      if (promiseBy) {
+        await fetch('/api/promises', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ party, expectedBy: promiseBy, outstandingAt: 0, note: note || undefined }),
+        });
+      }
       onSaved();
-    } catch (e: any) {
-      setErr(e.message); setSaving(false);
-    }
+    } catch (e: any) { setErr(e.message); setSaving(false); }
   }
 
   return (
-    <ModalShell
-      title="Log call"
-      onClose={onClose}
-      footer={
-        <>
-          <BtnSecondary onClick={onClose} disabled={saving}>Cancel</BtnSecondary>
-          <BtnPrimary onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save'}</BtnPrimary>
-        </>
-      }
-    >
+    <ModalShell title={`Log a Call · ${party}`} onClose={onClose}
+      footer={<>
+        <BtnSecondary onClick={onClose} disabled={saving}>Cancel</BtnSecondary>
+        <BtnPrimary onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Log Call'}</BtnPrimary>
+      </>}>
       <Field label="Outcome">
         <select value={outcome} onChange={e => setOutcome(e.target.value)} style={inputStyle}>
           {CALL_OUTCOMES.map(o => <option key={o} value={o}>{o}</option>)}
         </select>
       </Field>
-      <Field label="Note (optional)">
-        <textarea
-          value={note} onChange={e => setNote(e.target.value)}
-          placeholder="What was discussed, what was committed…"
-          rows={3} style={{ ...inputStyle, resize: 'vertical' }}
-        />
-      </Field>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+        <Field label="Status">
+          <select value={status} onChange={e => setStatus(e.target.value)} style={inputStyle}>
+            <option>Pending</option>
+            <option>Resolved</option>
+            <option>Doubtful</option>
+            <option>Legal</option>
+          </select>
+        </Field>
         <Field label="Next follow-up">
           <input type="date" value={nextFu} onChange={e => setNextFu(e.target.value)} style={inputStyle} />
         </Field>
-        <Field label="New status (optional)">
-          <input type="text" value={status} onChange={e => setStatus(e.target.value)} placeholder="Pending / Resolved" style={inputStyle} />
-        </Field>
       </div>
+      <Field label="Promise to pay by (optional)">
+        <input type="date" value={promiseBy} onChange={e => setPromiseBy(e.target.value)} style={inputStyle} />
+      </Field>
+      <Field label="Note">
+        <textarea value={note} onChange={e => setNote(e.target.value)} placeholder="What did they say?"
+          rows={3} style={{ ...inputStyle, resize: 'vertical' }} />
+      </Field>
       {err && <div style={{ color: 'var(--rust)', fontSize: 12, marginTop: 8 }}>{err}</div>}
     </ModalShell>
   );
 }
 
-// ─── Add Promise modal ────────────────────────────────────────
-function AddPromiseModal({
-  party, currentOutstanding, onClose, onSaved,
-}: {
-  party: string;
-  currentOutstanding: number;
-  onClose: () => void;
-  onSaved: () => void;
-}) {
-  // Default expectedBy = today + 7 days
+// ─── Add Promise modal ───────────────────────────────────────
+function AddPromiseModal({ party, currentOutstanding, onClose, onSaved }: { party: string; currentOutstanding: number; onClose: () => void; onSaved: () => void }) {
   const defaultDate = new Date(Date.now() + 7 * 86400_000).toISOString().slice(0, 10);
   const [expectedBy, setExpectedBy] = useState(defaultDate);
   const [outstandingAt, setOutstandingAt] = useState(String(currentOutstanding));
@@ -687,209 +1016,82 @@ function AddPromiseModal({
       const r = await fetch('/api/promises', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          party, expectedBy,
-          outstandingAt: Number(outstandingAt),
-          note: note || undefined,
-        }),
+        body: JSON.stringify({ party, expectedBy, outstandingAt: Number(outstandingAt), note: note || undefined }),
       }).then(x => x.json());
       if (!r?.ok) throw new Error(r?.error || 'Failed to add promise');
       onSaved();
-    } catch (e: any) {
-      setErr(e.message); setSaving(false);
-    }
+    } catch (e: any) { setErr(e.message); setSaving(false); }
   }
-
   return (
-    <ModalShell
-      title="Add promise"
-      onClose={onClose}
-      footer={
-        <>
-          <BtnSecondary onClick={onClose} disabled={saving}>Cancel</BtnSecondary>
-          <BtnPrimary onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save'}</BtnPrimary>
-        </>
-      }
-    >
+    <ModalShell title="Add promise" onClose={onClose}
+      footer={<><BtnSecondary onClick={onClose} disabled={saving}>Cancel</BtnSecondary><BtnPrimary onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save'}</BtnPrimary></>}>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-        <Field label="Expected by">
-          <input type="date" value={expectedBy} onChange={e => setExpectedBy(e.target.value)} style={inputStyle} />
-        </Field>
-        <Field label="Amount promised (₹)">
-          <input
-            type="number" min="0" step="1"
-            value={outstandingAt} onChange={e => setOutstandingAt(e.target.value)}
-            style={{ ...inputStyle, fontFamily: "'JetBrains Mono', monospace" }}
-          />
-        </Field>
+        <Field label="Expected by"><input type="date" value={expectedBy} onChange={e => setExpectedBy(e.target.value)} style={inputStyle} /></Field>
+        <Field label="Amount (₹)"><input type="number" min="0" step="1" value={outstandingAt} onChange={e => setOutstandingAt(e.target.value)} style={{ ...inputStyle, fontFamily: "'JetBrains Mono', monospace" }} /></Field>
       </div>
-      <Field label="Note (optional)">
-        <textarea
-          value={note} onChange={e => setNote(e.target.value)}
-          placeholder="Who promised, how, any conditions"
-          rows={3} style={{ ...inputStyle, resize: 'vertical' }}
-        />
-      </Field>
+      <Field label="Note (optional)"><textarea value={note} onChange={e => setNote(e.target.value)} placeholder="Who promised, how, any conditions" rows={3} style={{ ...inputStyle, resize: 'vertical' }} /></Field>
       {err && <div style={{ color: 'var(--rust)', fontSize: 12, marginTop: 8 }}>{err}</div>}
     </ModalShell>
   );
 }
 
-// ─── Form bits shared by modals ───────────────────────────────
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <label style={{ display: 'block', marginBottom: 14 }}>
-      <div style={{
-        fontSize: 10, letterSpacing: '.18em', textTransform: 'uppercase',
-        color: 'var(--t-3)', fontWeight: 700, marginBottom: 6,
-      }}>{label}</div>
-      {children}
-    </label>
-  );
-}
-
-const inputStyle: React.CSSProperties = {
-  width: '100%', fontSize: 14, padding: '10px 12px',
-  border: '1px solid var(--line, #e7eaf0)', borderRadius: 8,
-  outline: 'none', color: 'var(--navy-deep)', fontFamily: 'inherit',
-  background: 'var(--bg-1, #fff)',
-};
-
-function BtnPrimary({ children, onClick, disabled }: { children: React.ReactNode; onClick: () => void; disabled?: boolean }) {
-  return (
-    <button onClick={onClick} disabled={disabled} style={{
-      background: 'var(--navy-deep)', color: '#fff',
-      border: 'none', borderRadius: 8, padding: '9px 18px',
-      fontSize: 13, fontWeight: 600, cursor: disabled ? 'not-allowed' : 'pointer',
-      opacity: disabled ? 0.6 : 1,
-    }}>{children}</button>
-  );
-}
-
-function BtnSecondary({ children, onClick, disabled }: { children: React.ReactNode; onClick: () => void; disabled?: boolean }) {
-  return (
-    <button onClick={onClick} disabled={disabled} style={{
-      background: 'transparent', color: 'var(--t-2)',
-      border: '1px solid var(--line, #e7eaf0)', borderRadius: 8, padding: '9px 18px',
-      fontSize: 13, fontWeight: 500, cursor: disabled ? 'not-allowed' : 'pointer',
-    }}>{children}</button>
-  );
-}
-
-// ─── Settle Promise modal (Mark Kept with amount received) ────
-function SettlePromiseModal({
-  promise, onClose, onSaved,
-}: {
-  promise: any;
-  onClose: () => void;
-  onSaved: () => void;
-}) {
+// ─── Settle Promise modal ────────────────────────────────────
+function SettlePromiseModal({ promise, onClose, onSaved }: { promise: any; onClose: () => void; onSaved: () => void }) {
   const [amount, setAmount] = useState(String(promise.outstandingAt || 0));
   const [settledOn, setSettledOn] = useState(new Date().toISOString().slice(0, 10));
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-
   async function save() {
     setSaving(true); setErr(null);
     try {
       const r = await fetch(`/api/promises/${encodeURIComponent(promise.id)}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          status: 'Kept',
-          amountReceived: Number(amount),
-          settledOn,
-        }),
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'Kept', amountReceived: Number(amount), settledOn }),
       }).then(x => x.json());
       if (!r?.ok) throw new Error(r?.error || 'Failed to settle');
       onSaved();
-    } catch (e: any) {
-      setErr(e.message); setSaving(false);
-    }
+    } catch (e: any) { setErr(e.message); setSaving(false); }
   }
-
   return (
-    <ModalShell
-      title="Mark promise kept"
-      onClose={onClose}
-      footer={
-        <>
-          <BtnSecondary onClick={onClose} disabled={saving}>Cancel</BtnSecondary>
-          <BtnPrimary onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Confirm settled'}</BtnPrimary>
-        </>
-      }
-    >
+    <ModalShell title="Mark promise kept" onClose={onClose}
+      footer={<><BtnSecondary onClick={onClose} disabled={saving}>Cancel</BtnSecondary><BtnPrimary onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Confirm settled'}</BtnPrimary></>}>
       <div style={{ fontSize: 12, color: 'var(--t-3)', marginBottom: 12 }}>
         Promised: <strong style={{ color: 'var(--navy-deep)' }}>{fmtINR(Number(promise.outstandingAt))}</strong> by {fmtDate(promise.expectedBy)}
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-        <Field label="Amount received (₹)">
-          <input
-            type="number" min="0" step="1"
-            value={amount} onChange={e => setAmount(e.target.value)}
-            style={{ ...inputStyle, fontFamily: "'JetBrains Mono', monospace" }}
-          />
-        </Field>
-        <Field label="Settled on">
-          <input type="date" value={settledOn} onChange={e => setSettledOn(e.target.value)} style={inputStyle} />
-        </Field>
+        <Field label="Amount received (₹)"><input type="number" min="0" step="1" value={amount} onChange={e => setAmount(e.target.value)} style={{ ...inputStyle, fontFamily: "'JetBrains Mono', monospace" }} /></Field>
+        <Field label="Settled on"><input type="date" value={settledOn} onChange={e => setSettledOn(e.target.value)} style={inputStyle} /></Field>
       </div>
       {err && <div style={{ color: 'var(--rust)', fontSize: 12, marginTop: 8 }}>{err}</div>}
     </ModalShell>
   );
 }
 
-// ─── Flag Hold modal ──────────────────────────────────────────
-function FlagHoldModal({
-  party, currentOutstanding, onClose, onSaved,
-}: {
-  party: string;
-  currentOutstanding: number;
-  onClose: () => void;
-  onSaved: () => void;
-}) {
+// ─── Flag Hold modal ─────────────────────────────────────────
+function FlagHoldModal({ party, currentOutstanding, onClose, onSaved }: { party: string; currentOutstanding: number; onClose: () => void; onSaved: () => void }) {
   const [reason, setReason] = useState('');
   const [status, setStatus] = useState<'Candidate' | 'Active'>('Candidate');
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-
   async function save() {
     if (reason.trim().length < 3) { setErr('Reason is required (3+ chars)'); return; }
     setSaving(true); setErr(null);
     try {
       const r = await fetch('/api/holds', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ party, reason, status }),
       }).then(x => x.json());
       if (!r?.ok) throw new Error(r?.error || 'Failed to flag hold');
       onSaved();
-    } catch (e: any) {
-      setErr(e.message); setSaving(false);
-    }
+    } catch (e: any) { setErr(e.message); setSaving(false); }
   }
-
   return (
-    <ModalShell
-      title="Flag hold"
-      onClose={onClose}
-      footer={
-        <>
-          <BtnSecondary onClick={onClose} disabled={saving}>Cancel</BtnSecondary>
-          <BtnPrimary onClick={save} disabled={saving}>{saving ? 'Saving…' : status === 'Active' ? 'Activate hold' : 'Flag as candidate'}</BtnPrimary>
-        </>
-      }
-    >
+    <ModalShell title="Place account on hold" onClose={onClose}
+      footer={<><BtnSecondary onClick={onClose} disabled={saving}>Cancel</BtnSecondary><BtnPrimary onClick={save} disabled={saving}>{saving ? 'Saving…' : status === 'Active' ? 'Activate hold' : 'Flag as candidate'}</BtnPrimary></>}>
       <div style={{ fontSize: 12, color: 'var(--t-3)', marginBottom: 12 }}>
         Outstanding: <strong style={{ color: 'var(--navy-deep)' }}>{fmtINR(currentOutstanding)}</strong>
       </div>
-      <Field label="Reason">
-        <textarea
-          value={reason} onChange={e => setReason(e.target.value)}
-          placeholder="Why is this account being held? (visible to booking team)"
-          rows={3} style={{ ...inputStyle, resize: 'vertical' }}
-        />
-      </Field>
+      <Field label="Reason"><textarea value={reason} onChange={e => setReason(e.target.value)} placeholder="Why is this account being held? (visible to booking team)" rows={3} style={{ ...inputStyle, resize: 'vertical' }} /></Field>
       <Field label="Status">
         <div style={{ display: 'flex', gap: 14 }}>
           <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
@@ -905,4 +1107,82 @@ function FlagHoldModal({
       {err && <div style={{ color: 'var(--rust)', fontSize: 12, marginTop: 8 }}>{err}</div>}
     </ModalShell>
   );
+}
+
+// ─── Credit modal ────────────────────────────────────────────
+function CreditModal({ accountId, account, onClose, onSaved }: { accountId: string; account: any; onClose: () => void; onSaved: () => void }) {
+  const [limit, setLimit] = useState(String(account.creditLimit || 0));
+  const [period, setPeriod] = useState(account.creditPeriod || '');
+  const [onTime, setOnTime] = useState(account.onTimePct || '');
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  async function save() {
+    setSaving(true); setErr(null);
+    try {
+      const r = await fetch(`/api/accounts/${encodeURIComponent(accountId)}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ creditLimit: Number(limit), creditPeriod: period || null, onTimePct: onTime || null }),
+      }).then(x => x.json());
+      if (!r?.ok) throw new Error(r?.error || 'Failed to save');
+      onSaved();
+    } catch (e: any) { setErr(e.message); setSaving(false); }
+  }
+  return (
+    <ModalShell title="Credit policy" onClose={onClose}
+      footer={<><BtnSecondary onClick={onClose} disabled={saving}>Cancel</BtnSecondary><BtnPrimary onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save'}</BtnPrimary></>}>
+      <Field label="Credit limit (₹)"><input type="number" min="0" step="1" value={limit} onChange={e => setLimit(e.target.value)} style={{ ...inputStyle, fontFamily: "'JetBrains Mono', monospace" }} /></Field>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+        <Field label="Credit period"><input type="text" value={period} onChange={e => setPeriod(e.target.value)} placeholder="e.g. ≤30 days" style={inputStyle} /></Field>
+        <Field label="On-time %"><input type="text" value={onTime} onChange={e => setOnTime(e.target.value)} placeholder="e.g. 82%" style={inputStyle} /></Field>
+      </div>
+      {err && <div style={{ color: 'var(--rust)', fontSize: 12, marginTop: 8 }}>{err}</div>}
+    </ModalShell>
+  );
+}
+
+// ─── History modal (edit freeform Account.history text) ──────
+function HistoryModal({ accountId, initial, onClose, onSaved }: { accountId: string; initial: string; onClose: () => void; onSaved: () => void }) {
+  const [text, setText] = useState(initial);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  async function save() {
+    setSaving(true); setErr(null);
+    try {
+      const r = await fetch(`/api/accounts/${encodeURIComponent(accountId)}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ history: text }),
+      }).then(x => x.json());
+      if (!r?.ok) throw new Error(r?.error || 'Failed to save');
+      onSaved();
+    } catch (e: any) { setErr(e.message); setSaving(false); }
+  }
+  return (
+    <ModalShell title="Edit history" onClose={onClose}
+      footer={<><BtnSecondary onClick={onClose} disabled={saving}>Cancel</BtnSecondary><BtnPrimary onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save'}</BtnPrimary></>}>
+      <Field label="History notes"><textarea value={text} onChange={e => setText(e.target.value)} rows={10} style={{ ...inputStyle, resize: 'vertical', fontFamily: 'inherit' }} /></Field>
+      {err && <div style={{ color: 'var(--rust)', fontSize: 12, marginTop: 8 }}>{err}</div>}
+    </ModalShell>
+  );
+}
+
+// ─── Form bits ──────────────────────────────────────────────
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <label style={{ display: 'block', marginBottom: 14 }}>
+      <div style={{ fontSize: 10, letterSpacing: '.18em', textTransform: 'uppercase', color: 'var(--t-3)', fontWeight: 700, marginBottom: 6 }}>{label}</div>
+      {children}
+    </label>
+  );
+}
+const inputStyle: React.CSSProperties = {
+  width: '100%', fontSize: 14, padding: '10px 12px',
+  border: '1px solid var(--line, #e7eaf0)', borderRadius: 8,
+  outline: 'none', color: 'var(--navy-deep)', fontFamily: 'inherit',
+  background: '#fff',
+};
+function BtnPrimary({ children, onClick, disabled }: { children: React.ReactNode; onClick: () => void; disabled?: boolean }) {
+  return <button onClick={onClick} disabled={disabled} style={{ background: 'var(--navy-deep)', color: '#fff', border: 'none', borderRadius: 8, padding: '10px 18px', fontSize: 12, fontWeight: 700, letterSpacing: '.06em', cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.6 : 1 }}>{children}</button>;
+}
+function BtnSecondary({ children, onClick, disabled }: { children: React.ReactNode; onClick: () => void; disabled?: boolean }) {
+  return <button onClick={onClick} disabled={disabled} style={{ background: 'transparent', color: 'var(--t-2)', border: '1px solid var(--line, #e7eaf0)', borderRadius: 8, padding: '10px 18px', fontSize: 12, fontWeight: 600, cursor: disabled ? 'not-allowed' : 'pointer' }}>{children}</button>;
 }
