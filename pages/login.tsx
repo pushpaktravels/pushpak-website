@@ -59,7 +59,7 @@ export default function Login() {
           <img
             src="/pushpak-logo2.png"
             alt="Pushpak"
-            style={{ height: 64, width: 'auto', margin: '0 auto', display: 'block' }}
+            style={{ height: 92, width: 'auto', margin: '0 auto', display: 'block' }}
           />
           <div style={{
             marginTop: 10, fontSize: 10.5, fontWeight: 600,
@@ -73,7 +73,7 @@ export default function Login() {
         {/* Card */}
         <form onSubmit={submit} style={{
           background: 'rgba(255,255,255,0.95)', color: '#0F2855',
-          padding: '36px 36px 30px', borderRadius: 18, minWidth: 360, maxWidth: 440, width: '100%',
+          padding: '30px 30px 26px', borderRadius: 16, minWidth: 320, maxWidth: 380, width: '100%',
           boxShadow: '0 30px 80px rgba(0,0,0,0.45), 0 10px 22px rgba(0,0,0,0.18)',
         }}>
           <h1 style={{ fontSize: 26, fontWeight: 600, marginBottom: 6, textAlign: 'center', color: '#0F2855' }}>
