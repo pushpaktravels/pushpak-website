@@ -160,7 +160,7 @@ export default function UsersAuthPage() {
                   <Td>
                     <strong style={{ color: 'var(--navy-deep)', fontSize: 14 }}>{u.name}</strong>
                   </Td>
-                  <Td><span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, color: 'var(--t-2)' }}>{u.execId}</span></Td>
+                  <Td><span style={{ fontFamily: "inherit", fontSize: 12, color: 'var(--t-2)' }}>{u.execId}</span></Td>
                   <Td>
                     <span style={{
                       background: meta.bg, color: meta.fg,
@@ -173,7 +173,7 @@ export default function UsersAuthPage() {
                     <Toggle on={u.scoreboard} onChange={v => toggleScoreboard(u, v)} disabled={!u.active} />
                   </Td>
                   <Td align="center">
-                    <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, color: 'var(--t-2)' }}>
+                    <span style={{ fontFamily: "inherit", fontSize: 13, color: 'var(--t-2)' }}>
                       {visibleCount(u)} / {VIEWS.length}
                     </span>
                   </Td>
@@ -325,7 +325,7 @@ function UserEditModal({
           </div>
           {mode === 'create' && (
             <Field label="Executive ID">
-              <input type="text" value={execId} onChange={e => setExecId(e.target.value.toUpperCase())} placeholder="e.g. RAUNAK01" style={{ ...inputStyle, fontFamily: "'JetBrains Mono', monospace" }} />
+              <input type="text" value={execId} onChange={e => setExecId(e.target.value.toUpperCase())} placeholder="e.g. RAUNAK01" style={{ ...inputStyle, fontFamily: "inherit" }} />
             </Field>
           )}
           <Field label={mode === 'create' ? 'Password' : <>Password <span style={{ color: 'var(--t-3)', fontWeight: 500 }}>(leave blank to keep unchanged)</span></>}>

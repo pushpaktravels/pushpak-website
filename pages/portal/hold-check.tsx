@@ -159,7 +159,7 @@ function Td({ children, align, mono }: { children: React.ReactNode; align?: 'lef
     <td style={{
       textAlign: align || 'left',
       padding: '12px 14px', color: 'var(--t-1)', verticalAlign: 'middle',
-      fontFamily: mono ? "'JetBrains Mono', monospace" : undefined,
+      fontFamily: mono ? "inherit" : undefined,
     }}>{children}</td>
   );
 }

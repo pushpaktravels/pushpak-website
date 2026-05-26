@@ -130,8 +130,8 @@ export default function Login() {
         {/* Footer quote — sits naturally below the card now that the main container is center-justified */}
         <div style={{ textAlign: 'center', maxWidth: 520, color: 'rgba(255,255,255,0.62)' }}>
           <div style={{
-            fontFamily: 'Lora, Georgia, serif', fontStyle: 'italic',
-            fontSize: 14.5, lineHeight: 1.55, fontWeight: 500,
+            fontFamily: 'inherit', fontStyle: 'italic',
+            fontSize: 14.5, lineHeight: 1.55, fontWeight: 400,
           }}>
             "Quality is never an accident; it is always the result of intelligent effort."
           </div>

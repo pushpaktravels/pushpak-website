@@ -84,7 +84,7 @@ export default function ScoreboardPage() {
               </div>
               <div style={{ textAlign: 'right' }}>
                 <div style={{
-                  fontFamily: "'JetBrains Mono', monospace", fontSize: 26, fontWeight: 600,
+                  fontFamily: "inherit", fontSize: 26, fontWeight: 600,
                   color: idx === 0 ? '#fff' : 'var(--navy-deep)',
                 }}>{r.points}</div>
                 <div style={{ fontSize: 10, letterSpacing: '.18em', textTransform: 'uppercase', color: idx === 0 ? 'rgba(255,255,255,.6)' : 'var(--t-3)', fontWeight: 600, marginTop: 2 }}>

@@ -60,7 +60,7 @@ export default function CollectionListPage() {
         </div>
         <div style={{ textAlign: 'right' }}>
           <div style={{ fontSize: 10, letterSpacing: '.22em', textTransform: 'uppercase', color: 'var(--t-3)', fontWeight: 700 }}>Recovered</div>
-          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 20, color: 'var(--sage)', fontWeight: 600 }}>{fmtINR(total)}</div>
+          <div style={{ fontFamily: "inherit", fontSize: 20, color: 'var(--sage)', fontWeight: 600 }}>{fmtINR(total)}</div>
         </div>
       </div>
 
@@ -122,4 +122,4 @@ const tableStyle: React.CSSProperties = { width: '100%', borderCollapse: 'collap
 const theadStyle: React.CSSProperties = { background: 'var(--bg-2, #f6f8fb)', borderBottom: '1px solid var(--line, #e7eaf0)' };
 const trStyle: React.CSSProperties = { cursor: 'pointer', borderBottom: '1px solid var(--line, #e7eaf0)' };
 function Th({ children, align }: { children: React.ReactNode; align?: 'left' | 'right' }) { return <th style={{ textAlign: align || 'left', padding: '10px 14px', fontSize: 10, letterSpacing: '.16em', textTransform: 'uppercase', color: 'var(--t-3)', fontWeight: 700 }}>{children}</th>; }
-function Td({ children, align, mono, style }: { children: React.ReactNode; align?: 'left' | 'right'; mono?: boolean; style?: React.CSSProperties }) { return <td style={{ textAlign: align || 'left', padding: '12px 14px', color: 'var(--t-1)', verticalAlign: 'middle', fontFamily: mono ? "'JetBrains Mono', monospace" : undefined, ...style }}>{children}</td>; }
+function Td({ children, align, mono, style }: { children: React.ReactNode; align?: 'left' | 'right'; mono?: boolean; style?: React.CSSProperties }) { return <td style={{ textAlign: align || 'left', padding: '12px 14px', color: 'var(--t-1)', verticalAlign: 'middle', fontFamily: mono ? "inherit" : undefined, ...style }}>{children}</td>; }

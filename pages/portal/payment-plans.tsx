@@ -105,7 +105,7 @@ export default function DoubtfulLedgerPage() {
                     </div>
                   </div>
                   <div style={{ textAlign: 'right', minWidth: 180 }}>
-                    <div style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, color: 'var(--navy-deep)', fontSize: 14 }}>
+                    <div style={{ fontFamily: "inherit", fontWeight: 600, color: 'var(--navy-deep)', fontSize: 14 }}>
                       {fmtINR(Number(p.totalReceived))} / {fmtINR(Number(p.planTotal))}
                     </div>
                     <div style={{ marginTop: 6, height: 6, background: 'var(--bg-2, #f6f8fb)', borderRadius: 3, overflow: 'hidden' }}>
@@ -159,7 +159,7 @@ function Loading() { return <div style={{ padding: 32, color: 'var(--t-3)' }}>Lo
 function ErrorBox({ children }: { children: React.ReactNode }) { return <div style={{ padding: 16, color: 'var(--rust)' }}>Failed: {children}</div>; }
 function EmptyState({ title, body }: { title: string; body: string }) { return <div className="view-empty" style={{ padding: 40, textAlign: 'center' }}><h3 style={{ fontSize: 18, color: 'var(--navy-deep)', marginBottom: 8 }}>{title}</h3><p style={{ color: 'var(--t-2)' }}>{body}</p></div>; }
 function Th({ children, align }: { children: React.ReactNode; align?: 'left' | 'right' }) { return <th style={{ textAlign: align || 'left', padding: '10px 14px', fontSize: 10, letterSpacing: '.16em', textTransform: 'uppercase', color: 'var(--t-3)', fontWeight: 700 }}>{children}</th>; }
-function Td({ children, align, mono }: { children: React.ReactNode; align?: 'left' | 'right'; mono?: boolean }) { return <td style={{ textAlign: align || 'left', padding: '10px 14px', color: 'var(--t-1)', verticalAlign: 'middle', fontFamily: mono ? "'JetBrains Mono', monospace" : undefined }}>{children}</td>; }
+function Td({ children, align, mono }: { children: React.ReactNode; align?: 'left' | 'right'; mono?: boolean }) { return <td style={{ textAlign: align || 'left', padding: '10px 14px', color: 'var(--t-1)', verticalAlign: 'middle', fontFamily: mono ? "inherit" : undefined }}>{children}</td>; }
 
 function InstStatusPill({ status }: { status: string }) {
   const map: Record<string, { bg: string; fg: string }> = {

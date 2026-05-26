@@ -435,7 +435,7 @@ function AccountTab({
         }}>
           <div>
             <div style={{ fontSize: 10, letterSpacing: '.22em', textTransform: 'uppercase', color: 'var(--t-3)', fontWeight: 700, marginBottom: 6 }}>Outstanding</div>
-            <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 26, fontWeight: 700, color: 'var(--navy-deep)', lineHeight: 1 }}>
+            <div style={{ fontFamily: "inherit", fontSize: 26, fontWeight: 700, color: 'var(--navy-deep)', lineHeight: 1 }}>
               {fmtINR(Number(a.bill || 0))}
             </div>
             <div style={{ fontSize: 11.5, color: 'var(--t-3)', marginTop: 6 }}>Across {a.exec || '—'}</div>
@@ -464,7 +464,7 @@ function AccountTab({
               borderLeft: i === 0 ? 'none' : '1px solid var(--line, #e7eaf0)',
             }}>
               <div style={{ fontSize: 9.5, letterSpacing: '.22em', textTransform: 'uppercase', color: 'var(--t-3)', fontWeight: 700, marginBottom: 6 }}>{b.label}</div>
-              <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 14, fontWeight: 600, color: Number(b.value) === 0 ? 'var(--t-3)' : 'var(--navy-deep)' }}>{fmtINR(Number(b.value || 0))}</div>
+              <div style={{ fontFamily: "inherit", fontSize: 14, fontWeight: 600, color: Number(b.value) === 0 ? 'var(--t-3)' : 'var(--navy-deep)' }}>{fmtINR(Number(b.value || 0))}</div>
             </div>
           ))}
         </div>
@@ -614,7 +614,7 @@ function PaymentPlanDetails({
               }}>
                 <div style={{ fontWeight: 600, color: 'var(--navy-deep)' }}>{i.instNo}/{instalments.length}</div>
                 <div style={{ color: 'var(--t-3)' }}>due {fmtDate(i.dueDate)}</div>
-                <div style={{ fontFamily: "'JetBrains Mono', monospace", textAlign: 'right' }}>{fmtINR(Number(i.amount))}</div>
+                <div style={{ fontFamily: "inherit", textAlign: 'right' }}>{fmtINR(Number(i.amount))}</div>
                 <div style={{ textAlign: 'right' }}><MiniPill status={i.status} /></div>
               </div>
               {/* Inline action buttons — only for Pending instalments */}
@@ -776,7 +776,7 @@ function KvBlock({ label, value, color }: { label: string; value: string; color?
   return (
     <div>
       <div style={{ fontSize: 9.5, letterSpacing: '.18em', textTransform: 'uppercase', color: 'var(--t-3)', fontWeight: 700, marginBottom: 4 }}>{label}</div>
-      <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 14, fontWeight: 600, color: c }}>{value}</div>
+      <div style={{ fontFamily: "inherit", fontSize: 14, fontWeight: 600, color: c }}>{value}</div>
     </div>
   );
 }
@@ -1134,7 +1134,7 @@ function AddPromiseModal({ party, currentOutstanding, onClose, onSaved }: { part
       footer={<><BtnSecondary onClick={onClose} disabled={saving}>Cancel</BtnSecondary><BtnPrimary onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save'}</BtnPrimary></>}>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
         <Field label="Expected by"><input type="date" value={expectedBy} onChange={e => setExpectedBy(e.target.value)} style={inputStyle} /></Field>
-        <Field label="Amount (₹)"><input type="number" min="0" step="1" value={outstandingAt} onChange={e => setOutstandingAt(e.target.value)} style={{ ...inputStyle, fontFamily: "'JetBrains Mono', monospace" }} /></Field>
+        <Field label="Amount (₹)"><input type="number" min="0" step="1" value={outstandingAt} onChange={e => setOutstandingAt(e.target.value)} style={{ ...inputStyle, fontFamily: "inherit" }} /></Field>
       </div>
       <Field label="Note (optional)"><textarea value={note} onChange={e => setNote(e.target.value)} placeholder="Who promised, how, any conditions" rows={3} style={{ ...inputStyle, resize: 'vertical' }} /></Field>
       {err && <div style={{ color: 'var(--rust)', fontSize: 12, marginTop: 8 }}>{err}</div>}
@@ -1166,7 +1166,7 @@ function SettlePromiseModal({ promise, onClose, onSaved }: { promise: any; onClo
         Promised: <strong style={{ color: 'var(--navy-deep)' }}>{fmtINR(Number(promise.outstandingAt))}</strong> by {fmtDate(promise.expectedBy)}
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-        <Field label="Amount received (₹)"><input type="number" min="0" step="1" value={amount} onChange={e => setAmount(e.target.value)} style={{ ...inputStyle, fontFamily: "'JetBrains Mono', monospace" }} /></Field>
+        <Field label="Amount received (₹)"><input type="number" min="0" step="1" value={amount} onChange={e => setAmount(e.target.value)} style={{ ...inputStyle, fontFamily: "inherit" }} /></Field>
         <Field label="Settled on"><input type="date" value={settledOn} onChange={e => setSettledOn(e.target.value)} style={inputStyle} /></Field>
       </div>
       {err && <div style={{ color: 'var(--rust)', fontSize: 12, marginTop: 8 }}>{err}</div>}
@@ -1237,7 +1237,7 @@ function CreditModal({ accountId, account, onClose, onSaved }: { accountId: stri
   return (
     <ModalShell title="Credit policy" onClose={onClose}
       footer={<><BtnSecondary onClick={onClose} disabled={saving}>Cancel</BtnSecondary><BtnPrimary onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save'}</BtnPrimary></>}>
-      <Field label="Credit limit (₹)"><input type="number" min="0" step="1" value={limit} onChange={e => setLimit(e.target.value)} style={{ ...inputStyle, fontFamily: "'JetBrains Mono', monospace" }} /></Field>
+      <Field label="Credit limit (₹)"><input type="number" min="0" step="1" value={limit} onChange={e => setLimit(e.target.value)} style={{ ...inputStyle, fontFamily: "inherit" }} /></Field>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
         <Field label="Credit period"><input type="text" value={period} onChange={e => setPeriod(e.target.value)} placeholder="e.g. ≤30 days" style={inputStyle} /></Field>
         <Field label="On-time %"><input type="text" value={onTime} onChange={e => setOnTime(e.target.value)} placeholder="e.g. 82%" style={inputStyle} /></Field>
@@ -1426,7 +1426,7 @@ function DoubtfulEditModal({
       footer={<><BtnSecondary onClick={onClose} disabled={saving}>Cancel</BtnSecondary><BtnPrimary onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save'}</BtnPrimary></>}>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
         <Field label="Plan total (₹)">
-          <input type="number" min="0" step="1" value={planTotal} onChange={e => setPlanTotal(e.target.value)} style={{ ...inputStyle, fontFamily: "'JetBrains Mono', monospace" }} />
+          <input type="number" min="0" step="1" value={planTotal} onChange={e => setPlanTotal(e.target.value)} style={{ ...inputStyle, fontFamily: "inherit" }} />
         </Field>
         <Field label="Start date">
           <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} style={inputStyle} />
@@ -1450,14 +1450,14 @@ function DoubtfulEditModal({
               }}>
                 <div style={{ fontWeight: 600, color: 'var(--navy-deep)' }}>#{i.instNo}</div>
                 <input type="date" value={curDate} onChange={e2 => setInstField(i.id, 'dueDate', e2.target.value)} style={{ ...inputStyle, padding: '5px 7px', fontSize: 11 }} />
-                <input type="number" min="0" step="1" value={curAmount} onChange={e2 => setInstField(i.id, 'amount', e2.target.value)} style={{ ...inputStyle, padding: '5px 7px', fontSize: 11, fontFamily: "'JetBrains Mono', monospace" }} placeholder="Amount" />
+                <input type="number" min="0" step="1" value={curAmount} onChange={e2 => setInstField(i.id, 'amount', e2.target.value)} style={{ ...inputStyle, padding: '5px 7px', fontSize: 11, fontFamily: "inherit" }} placeholder="Amount" />
                 <select value={curStatus} onChange={e2 => setInstField(i.id, 'status', e2.target.value)} style={{ ...inputStyle, padding: '5px 7px', fontSize: 11 }}>
                   <option value="Pending">Pending</option>
                   <option value="Received">Received</option>
                   <option value="Broken">Broken</option>
                   <option value="Cancelled">Cancelled</option>
                 </select>
-                <input type="number" min="0" step="1" value={curReceived} onChange={e2 => setInstField(i.id, 'received', e2.target.value)} placeholder="Received" style={{ ...inputStyle, padding: '5px 7px', fontSize: 11, fontFamily: "'JetBrains Mono', monospace" }} />
+                <input type="number" min="0" step="1" value={curReceived} onChange={e2 => setInstField(i.id, 'received', e2.target.value)} placeholder="Received" style={{ ...inputStyle, padding: '5px 7px', fontSize: 11, fontFamily: "inherit" }} />
               </div>
             );
           })}
@@ -1470,7 +1470,7 @@ function DoubtfulEditModal({
             }}>
               <div style={{ fontWeight: 600, color: 'var(--sage)' }}>NEW</div>
               <input type="date" value={n.dueDate} onChange={e => setNewField(idx, 'dueDate', e.target.value)} style={{ ...inputStyle, padding: '5px 7px', fontSize: 11 }} />
-              <input type="number" min="0" step="1" value={n.amount} onChange={e => setNewField(idx, 'amount', e.target.value)} style={{ ...inputStyle, padding: '5px 7px', fontSize: 11, fontFamily: "'JetBrains Mono', monospace" }} placeholder="Amount" />
+              <input type="number" min="0" step="1" value={n.amount} onChange={e => setNewField(idx, 'amount', e.target.value)} style={{ ...inputStyle, padding: '5px 7px', fontSize: 11, fontFamily: "inherit" }} placeholder="Amount" />
               <div style={{ fontSize: 10, color: 'var(--sage)', letterSpacing: '.14em', textTransform: 'uppercase', fontWeight: 700 }}>Will save as Pending</div>
               <button onClick={() => removeNew(idx)} aria-label="Remove" style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--rust)', fontSize: 16 }}>×</button>
             </div>

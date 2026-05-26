@@ -86,7 +86,7 @@ export default function DashboardPage() {
                 ].map(b => (
                   <div key={b.label} style={{ padding: '12px 0' }}>
                     <div style={{ fontSize: 9.5, letterSpacing: '.22em', textTransform: 'uppercase', color: 'var(--t-3)', fontWeight: 700, marginBottom: 6 }}>{b.label}</div>
-                    <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 14, color: 'var(--navy-deep)', fontWeight: 600 }}>{fmtINR(b.value)}</div>
+                    <div style={{ fontFamily: "inherit", fontSize: 14, color: 'var(--navy-deep)', fontWeight: 600 }}>{fmtINR(b.value)}</div>
                   </div>
                 ))}
               </div>

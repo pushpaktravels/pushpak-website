@@ -5,7 +5,7 @@
    uses these utility classes + tokens.
    ============================================================ */
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Lora:ital,wght@1,400;1,500&family=JetBrains+Mono:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
 
 :root{
   --navy:#1A3F7E; --navy-deep:#0F2855; --navy-darker:#08183A; --navy-mid:#122F5F;
@@ -53,8 +53,11 @@ a{color:inherit;text-decoration:none}
 button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit}
 input,select,textarea{font-family:inherit;color:inherit}
 
-.mono{font-family:'JetBrains Mono',ui-monospace,monospace;font-feature-settings:"tnum"}
-.serif-i{font-family:'Inter',sans-serif;font-style:normal;font-weight:600}
+/* .mono and .serif-i collapsed to Inter. Tabular-figures stay on via
+   font-feature-settings:"tnum" inherited from <body>, so numerical
+   columns still align cleanly without needing a separate mono font. */
+.mono{font-family:inherit;font-feature-settings:"tnum"}
+.serif-i{font-family:inherit;font-style:normal;font-weight:600}
 .gold-rule{display:block;height:1.5px;width:48px;background:var(--gold-deep);opacity:.9;border:none}
 .eyebrow{font-size:10.5px;letter-spacing:.34em;text-transform:uppercase;font-weight:700;color:var(--gold-darker)}
 
@@ -118,7 +121,7 @@ input,select,textarea{font-family:inherit;color:inherit}
 .header-title .crumb{font-size:10.5px;letter-spacing:.32em;text-transform:uppercase;color:var(--t-3);font-weight:700}
 .header-title .crumb::before{content:'';display:inline-block;width:24px;height:1px;background:var(--line-2);vertical-align:middle;margin-right:14px;opacity:.7}
 .header-actions{display:flex;align-items:center;gap:14px;flex-shrink:0}
-.header-clock{font-family:'JetBrains Mono',monospace;font-size:12.5px;color:var(--t-2);letter-spacing:.04em;font-weight:500}
+.header-clock{font-family:inherit;font-feature-settings:"tnum";font-size:12.5px;color:var(--t-2);letter-spacing:.04em;font-weight:500}
 .header-clock .ist{color:var(--gold-darker);margin-left:6px;letter-spacing:.16em;font-weight:600}
 .user-avatar{
   width:36px;height:36px;border-radius:50%;

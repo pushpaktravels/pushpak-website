@@ -191,7 +191,7 @@ export default function SettingsPage() {
                       }}>
                         <div>
                           <div style={{
-                            fontFamily: "'JetBrains Mono', monospace",
+                            fontFamily: "inherit",
                             fontSize: 12.5, color: 'var(--navy-deep)', fontWeight: 600,
                             letterSpacing: '.02em',
                           }}>{s.key}</div>
@@ -207,7 +207,7 @@ export default function SettingsPage() {
                             fontSize: 14, padding: '9px 12px',
                             border: `1px solid ${editing ? 'var(--amber)' : 'var(--line, #e7eaf0)'}`,
                             borderRadius: 6, outline: 'none', color: 'var(--navy-deep)',
-                            fontFamily: "'JetBrains Mono', monospace",
+                            fontFamily: "inherit",
                             background: editing ? 'rgba(176,127,28,.07)' : '#fff',
                             transition: 'border-color .12s',
                           }}

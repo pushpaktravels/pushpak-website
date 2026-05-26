@@ -159,7 +159,7 @@ export default function InsightsPage() {
                   <div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 5 }}>
                       <span style={{ color: 'var(--t-3)' }}>Recovered</span>
-                      <span style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, color: 'var(--sage)' }}>{fmtINR(Number(row.recovered))}</span>
+                      <span style={{ fontFamily: "inherit", fontWeight: 600, color: 'var(--sage)' }}>{fmtINR(Number(row.recovered))}</span>
                     </div>
                     <div style={{ height: 6, background: 'var(--bg-2, #f6f8fb)', borderRadius: 3, overflow: 'hidden' }}>
                       <div style={{
@@ -249,7 +249,7 @@ export default function InsightsPage() {
             {aging.map(b => (
               <div key={b.label} style={{ borderLeft: `3px solid ${b.color}`, paddingLeft: 12 }}>
                 <div style={{ fontSize: 9.5, letterSpacing: '.22em', textTransform: 'uppercase', color: 'var(--t-3)', fontWeight: 700, marginBottom: 4 }}>{b.label}</div>
-                <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 16, fontWeight: 600, color: 'var(--navy-deep)' }}>{fmtINR(b.value)}</div>
+                <div style={{ fontFamily: "inherit", fontSize: 16, fontWeight: 600, color: 'var(--navy-deep)' }}>{fmtINR(b.value)}</div>
                 <div style={{ fontSize: 11, color: 'var(--t-3)', marginTop: 2 }}>{((b.value / agingTotal) * 100).toFixed(1)}% of book</div>
               </div>
             ))}
@@ -273,7 +273,7 @@ export default function InsightsPage() {
                     <div style={{ fontWeight: 600, color: 'var(--navy-deep)' }}>{a.party}</div>
                     <div style={{ fontSize: 11, color: 'var(--t-3)' }}>{a.family || '—'} · {a.exec || 'no exec'}</div>
                   </td>
-                  <td style={{ padding: '10px 14px', textAlign: 'right', fontFamily: "'JetBrains Mono', monospace" }}>{fmtINR(Number(a.bill))}</td>
+                  <td style={{ padding: '10px 14px', textAlign: 'right', fontFamily: "inherit" }}>{fmtINR(Number(a.bill))}</td>
                 </tr>
               ))}
             </tbody>
@@ -295,7 +295,7 @@ export default function InsightsPage() {
                         {f.active_holds > 0 && <span style={{ color: 'var(--rust)' }}> · {f.active_holds} active hold{f.active_holds === 1 ? '' : 's'}</span>}
                       </div>
                     </td>
-                    <td style={{ padding: '10px 14px', textAlign: 'right', fontFamily: "'JetBrains Mono', monospace" }}>{fmtINR(Number(f.total))}</td>
+                    <td style={{ padding: '10px 14px', textAlign: 'right', fontFamily: "inherit" }}>{fmtINR(Number(f.total))}</td>
                   </tr>
                 );
               })}
@@ -325,7 +325,7 @@ export default function InsightsPage() {
                         Last touched {a.lastTouched ? fmtRelative(a.lastTouched) : 'never'} · {a.exec || 'no exec'}
                       </div>
                     </td>
-                    <td style={{ padding: '10px 14px', textAlign: 'right', fontFamily: "'JetBrains Mono', monospace" }}>{fmtINR(Number(a.bill))}</td>
+                    <td style={{ padding: '10px 14px', textAlign: 'right', fontFamily: "inherit" }}>{fmtINR(Number(a.bill))}</td>
                   </tr>
                 ))}
               </tbody>
@@ -353,7 +353,7 @@ export default function InsightsPage() {
                         {a.onHold && <span style={{ color: 'var(--rust)' }}> · {a.onHold} hold</span>}
                       </div>
                     </td>
-                    <td style={{ padding: '10px 14px', textAlign: 'right', fontFamily: "'JetBrains Mono', monospace" }}>{fmtINR(Number(a.bill))}</td>
+                    <td style={{ padding: '10px 14px', textAlign: 'right', fontFamily: "inherit" }}>{fmtINR(Number(a.bill))}</td>
                   </tr>
                 ))}
               </tbody>
@@ -388,7 +388,7 @@ function Kpi({
       <div style={{
         fontSize: 20, fontWeight: 700, marginTop: 10,
         color: color ? colorMap[color] : 'var(--navy-deep)',
-        fontFamily: mono ? "'JetBrains Mono', monospace" : undefined,
+        fontFamily: mono ? "inherit" : undefined,
         letterSpacing: mono ? '-.01em' : '-.014em',
         lineHeight: 1.1,
       }}>{value}</div>
@@ -445,7 +445,7 @@ function Stat({ label, value, color }: { label: string; value: string; color?: '
   return (
     <div style={{ textAlign: 'center' }}>
       <div style={{ fontSize: 9.5, letterSpacing: '.22em', textTransform: 'uppercase', color: 'var(--t-3)', fontWeight: 700, marginBottom: 4 }}>{label}</div>
-      <div style={{ fontSize: 14, fontWeight: 600, color: c, fontFamily: "'JetBrains Mono', monospace" }}>{value}</div>
+      <div style={{ fontSize: 14, fontWeight: 600, color: c, fontFamily: "inherit" }}>{value}</div>
     </div>
   );
 }
@@ -456,7 +456,7 @@ function Legend({ color, label, value, pct }: { color: string; label: string; va
       <span style={{ width: 10, height: 10, borderRadius: 2, background: color, flexShrink: 0 }} />
       <span style={{ color: 'var(--t-2)', flex: 1 }}>{label}</span>
       <span style={{ color: 'var(--t-3)' }}>{pct}%</span>
-      <span style={{ fontFamily: "'JetBrains Mono', monospace", color: 'var(--navy-deep)', fontWeight: 600, minWidth: 24, textAlign: 'right' }}>{value}</span>
+      <span style={{ fontFamily: "inherit", color: 'var(--navy-deep)', fontWeight: 600, minWidth: 24, textAlign: 'right' }}>{value}</span>
     </div>
   );
 }
@@ -492,7 +492,7 @@ function PromiseDonut({ open, kept, broken, cancelled }: { open: number; kept: n
                     transform={`rotate(-90 ${cx} ${cy})`} />
           );
         })}
-        <text x={cx} y={cy - 4} textAnchor="middle" fontSize="22" fontWeight="700" fill="var(--navy-deep)" fontFamily="'JetBrains Mono', monospace">
+        <text x={cx} y={cy - 4} textAnchor="middle" fontSize="22" fontWeight="700" fill="var(--navy-deep)" fontFamily="inherit">
           {total}
         </text>
         <text x={cx} y={cy + 14} textAnchor="middle" fontSize="9" fill="var(--t-3)" letterSpacing=".18em">

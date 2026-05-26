@@ -224,7 +224,7 @@ function ExecCard({ stat, active, onClick }: { stat: ExecStat; active: boolean; 
       </div>
 
       <div style={{
-        fontFamily: "'JetBrains Mono', monospace",
+        fontFamily: "inherit",
         fontSize: 18, fontWeight: 600,
         color: active ? '#fff' : 'var(--navy-deep)',
         marginBottom: 4,
@@ -277,7 +277,7 @@ function Td({ children, align, mono }: { children: React.ReactNode; align?: 'lef
     <td style={{
       textAlign: align || 'left',
       padding: '12px 14px', color: 'var(--t-1)', verticalAlign: 'middle',
-      fontFamily: mono ? "'JetBrains Mono', monospace" : undefined,
+      fontFamily: mono ? "inherit" : undefined,
     }}>{children}</td>
   );
 }
