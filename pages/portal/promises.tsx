@@ -1,17 +1,20 @@
 // ============================================================
-// /portal/promises — Promise Ledger.
+// /portal/promises — Promise Ledger (account-grouped view).
 // ============================================================
-// All promises across visible accounts. Status filter at top.
-// Open (especially overdue) float to the top.
-// Click row → AccountDrawer.
+// One row per account that has at least one promise. Shows count
+// by status + latest expected date + outstanding. Click → drawer
+// where the full promise history for that account lives.
+//
+// Filter chips re-scope which promises count toward each row:
+//   All / Open / Kept / Broken / Cancelled
 // ============================================================
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { AppShell } from '../../components/AppShell';
 import { AccountDrawer } from '../../components/AccountDrawer';
 import { TierBadge } from '../../components/TierBadge';
 import { fmtINR, fmtDate } from '../../lib/fmt';
 
-type Row = {
+type PromiseRow = {
   id: string;
   party: string;
   family: string | null;
@@ -20,19 +23,33 @@ type Row = {
   outstandingAt: string | number;
   status: 'Open' | 'Kept' | 'Broken' | 'Cancelled';
   amountReceived: string | number;
-  settledOn: string | null;
-  notes: string | null;
   account_id: string | null;
   tier: string | null;
   hold: string | null;
   days_overdue: number | null;
 };
 
+type AccountGroup = {
+  accountId: string | null;
+  party: string;
+  family: string | null;
+  exec: string | null;
+  tier: string | null;
+  counts: { Open: number; Kept: number; Broken: number; Cancelled: number };
+  latestExpectedBy: string | null;
+  latestStatus: 'Open' | 'Kept' | 'Broken' | 'Cancelled';
+  totalAmount: number;
+  daysOverdue: number | null;
+};
+
 const STATUSES: Array<'all' | 'Open' | 'Kept' | 'Broken' | 'Cancelled'> = ['all', 'Open', 'Kept', 'Broken', 'Cancelled'];
+
+// Priority: Open (esp. overdue) > Broken > Kept > Cancelled
+const STATUS_PRIORITY: Record<string, number> = { Open: 0, Broken: 1, Kept: 2, Cancelled: 3 };
 
 export default function PromiseLedgerPage() {
   const [status, setStatus] = useState<typeof STATUSES[number]>('all');
-  const [rows, setRows] = useState<Row[] | null>(null);
+  const [rows, setRows] = useState<PromiseRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
 
@@ -47,6 +64,47 @@ export default function PromiseLedgerPage() {
       .catch(e => setError(e.message));
   }, [status]);
 
+  // Group rows by account (party) ─────────────────────────────
+  const groups: AccountGroup[] = useMemo(() => {
+    if (!rows) return [];
+    const map = new Map<string, AccountGroup>();
+    for (const r of rows) {
+      const key = r.party;
+      let g = map.get(key);
+      if (!g) {
+        g = {
+          accountId: r.account_id, party: r.party, family: r.family,
+          exec: r.exec, tier: r.tier,
+          counts: { Open: 0, Kept: 0, Broken: 0, Cancelled: 0 },
+          latestExpectedBy: r.expectedBy, latestStatus: r.status,
+          totalAmount: 0, daysOverdue: null,
+        };
+        map.set(key, g);
+      }
+      g.counts[r.status]++;
+      g.totalAmount += Number(r.outstandingAt || 0);
+
+      // Track the most-pressing promise as the row's representative status
+      const newer = !g.latestExpectedBy || new Date(r.expectedBy) > new Date(g.latestExpectedBy);
+      const moreUrgent = STATUS_PRIORITY[r.status] < STATUS_PRIORITY[g.latestStatus];
+      if (moreUrgent || (STATUS_PRIORITY[r.status] === STATUS_PRIORITY[g.latestStatus] && newer)) {
+        g.latestExpectedBy = r.expectedBy;
+        g.latestStatus = r.status;
+      }
+      if (r.status === 'Open' && r.days_overdue && r.days_overdue > 0) {
+        if (g.daysOverdue == null || r.days_overdue > g.daysOverdue) g.daysOverdue = r.days_overdue;
+      }
+    }
+    // Sort: Open first (most overdue first), then Broken, then Kept, then Cancelled.
+    return Array.from(map.values()).sort((a, b) => {
+      const pa = STATUS_PRIORITY[a.latestStatus] ?? 99;
+      const pb = STATUS_PRIORITY[b.latestStatus] ?? 99;
+      if (pa !== pb) return pa - pb;
+      if (a.daysOverdue && b.daysOverdue) return b.daysOverdue - a.daysOverdue;
+      return (b.latestExpectedBy || '').localeCompare(a.latestExpectedBy || '');
+    });
+  }, [rows]);
+
   return (
     <AppShell title="Promise Ledger" crumb="Promise Ledger">
       <FilterBar>
@@ -55,15 +113,18 @@ export default function PromiseLedgerPage() {
             {s === 'all' ? 'All' : s}
           </FilterChip>
         ))}
+        <div style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--t-3)' }}>
+          {groups.length} account{groups.length === 1 ? '' : 's'} · {rows?.length ?? 0} promise{rows?.length === 1 ? '' : 's'}
+        </div>
       </FilterBar>
 
       {error && <ErrorBox>{error}</ErrorBox>}
       {rows === null && !error && <Loading />}
-      {rows && rows.length === 0 && <EmptyState
+      {rows && groups.length === 0 && <EmptyState
         title={status === 'all' ? 'No promises yet' : `No ${status.toLowerCase()} promises`}
         body="Promises appear here as they are added from the Account Drawer." />}
 
-      {rows && rows.length > 0 && (
+      {groups.length > 0 && (
         <Card>
           <table style={tableStyle}>
             <thead>
@@ -71,33 +132,33 @@ export default function PromiseLedgerPage() {
                 <Th>Tier</Th>
                 <Th>Party</Th>
                 <Th>Family</Th>
-                <Th>Expected By</Th>
-                <Th align="right">Amount</Th>
-                <Th>Status</Th>
+                <Th>Latest expected</Th>
+                <Th align="right">Total amount</Th>
+                <Th>Promises</Th>
                 <Th>Exec</Th>
               </tr>
             </thead>
             <tbody>
-              {rows.map(r => (
-                <tr key={r.id}
-                    onClick={() => r.account_id && setOpenId(r.account_id)}
+              {groups.map(g => (
+                <tr key={g.party}
+                    onClick={() => g.accountId && setOpenId(g.accountId)}
                     style={trStyle}
                     onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-2, #f6f8fb)')}
                     onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
-                  <Td>{r.tier ? <TierBadge tier={r.tier} /> : '—'}</Td>
-                  <Td><strong style={{ color: 'var(--navy-deep)' }}>{r.party}</strong></Td>
-                  <Td>{r.family || '—'}</Td>
+                  <Td>{g.tier ? <TierBadge tier={g.tier} /> : '—'}</Td>
+                  <Td><strong style={{ color: 'var(--navy-deep)' }}>{g.party}</strong></Td>
+                  <Td>{g.family || '—'}</Td>
                   <Td>
-                    {fmtDate(r.expectedBy)}
-                    {r.days_overdue && r.days_overdue > 0 && (
+                    {g.latestExpectedBy ? fmtDate(g.latestExpectedBy) : '—'}
+                    {g.daysOverdue && g.daysOverdue > 0 && (
                       <span style={{ marginLeft: 8, color: 'var(--rust)', fontSize: 11, fontWeight: 600 }}>
-                        ↑ {r.days_overdue}d overdue
+                        ↑ {g.daysOverdue}d overdue
                       </span>
                     )}
                   </Td>
-                  <Td align="right" mono>{fmtINR(Number(r.outstandingAt))}</Td>
-                  <Td><PromiseStatusPill status={r.status} /></Td>
-                  <Td>{r.exec || '—'}</Td>
+                  <Td align="right" mono>{fmtINR(g.totalAmount)}</Td>
+                  <Td><PromiseCounts counts={g.counts} /></Td>
+                  <Td>{g.exec || '—'}</Td>
                 </tr>
               ))}
             </tbody>
@@ -110,17 +171,43 @@ export default function PromiseLedgerPage() {
   );
 }
 
-// ─── Shared bits (kept inline per-page for now; will extract if a 3rd page reuses) ─
-function FilterBar({ children }: { children: React.ReactNode }) {
+// ─── Promise count chips ─────────────────────────────────────
+function PromiseCounts({ counts }: { counts: Record<string, number> }) {
+  const map: Record<string, { bg: string; fg: string }> = {
+    Open:      { bg: 'rgba(176,127,28,.18)', fg: 'var(--amber)' },
+    Kept:      { bg: 'rgba(46,125,92,.18)',  fg: 'var(--sage)' },
+    Broken:    { bg: 'rgba(181,72,61,.18)',  fg: 'var(--rust)' },
+    Cancelled: { bg: 'rgba(100,116,139,.18)',fg: 'var(--t-2)' },
+  };
   return (
-    <div style={{
-      display: 'flex', gap: 8, marginBottom: 16, padding: '12px 16px',
-      background: 'var(--bg-1, #fff)', border: '1px solid var(--line, #e7eaf0)',
-      borderRadius: 12, flexWrap: 'wrap',
-    }}>{children}</div>
+    <span style={{ display: 'inline-flex', gap: 4, flexWrap: 'wrap' }}>
+      {(['Open','Broken','Kept','Cancelled'] as const).map(k => {
+        if (counts[k] === 0) return null;
+        const s = map[k];
+        return (
+          <span key={k} style={{
+            background: s.bg, color: s.fg, fontSize: 10, fontWeight: 700,
+            letterSpacing: '.08em', padding: '3px 7px', borderRadius: 5,
+            display: 'inline-flex', alignItems: 'center', gap: 4,
+          }}>
+            <strong>{counts[k]}</strong> {k}
+          </span>
+        );
+      })}
+    </span>
   );
 }
 
+// ─── Shared bits ─────────────────────────────────────────────
+function FilterBar({ children }: { children: React.ReactNode }) {
+  return (
+    <div style={{
+      display: 'flex', gap: 8, alignItems: 'center', marginBottom: 16,
+      padding: '12px 16px', background: 'var(--bg-1, #fff)',
+      border: '1px solid var(--line, #e7eaf0)', borderRadius: 12, flexWrap: 'wrap',
+    }}>{children}</div>
+  );
+}
 function FilterChip({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
   return (
     <button onClick={onClick} style={{
@@ -132,20 +219,11 @@ function FilterChip({ active, onClick, children }: { active: boolean; onClick: (
     }}>{children}</button>
   );
 }
-
 function Card({ children }: { children: React.ReactNode }) {
-  return (
-    <div style={{
-      background: 'var(--bg-1, #fff)', border: '1px solid var(--line, #e7eaf0)',
-      borderRadius: 12, overflow: 'hidden',
-    }}>{children}</div>
-  );
+  return <div style={{ background: 'var(--bg-1, #fff)', border: '1px solid var(--line, #e7eaf0)', borderRadius: 12, overflow: 'hidden' }}>{children}</div>;
 }
-
 function Loading() { return <div style={{ padding: 32, color: 'var(--t-3)' }}>Loading…</div>; }
-function ErrorBox({ children }: { children: React.ReactNode }) {
-  return <div style={{ padding: 16, color: 'var(--rust)' }}>Failed: {children}</div>;
-}
+function ErrorBox({ children }: { children: React.ReactNode }) { return <div style={{ padding: 16, color: 'var(--rust)' }}>Failed: {children}</div>; }
 function EmptyState({ title, body }: { title: string; body: string }) {
   return (
     <div className="view-empty" style={{ padding: 40, textAlign: 'center' }}>
@@ -154,25 +232,12 @@ function EmptyState({ title, body }: { title: string; body: string }) {
     </div>
   );
 }
-
 const tableStyle: React.CSSProperties = { width: '100%', borderCollapse: 'collapse', fontSize: 13 };
 const theadStyle: React.CSSProperties = { background: 'var(--bg-2, #f6f8fb)', borderBottom: '1px solid var(--line, #e7eaf0)' };
 const trStyle: React.CSSProperties = { cursor: 'pointer', borderBottom: '1px solid var(--line, #e7eaf0)' };
-
 function Th({ children, align }: { children: React.ReactNode; align?: 'left' | 'right' }) {
   return <th style={{ textAlign: align || 'left', padding: '10px 14px', fontSize: 10, letterSpacing: '.16em', textTransform: 'uppercase', color: 'var(--t-3)', fontWeight: 700 }}>{children}</th>;
 }
 function Td({ children, align, mono }: { children: React.ReactNode; align?: 'left' | 'right'; mono?: boolean }) {
   return <td style={{ textAlign: align || 'left', padding: '12px 14px', color: 'var(--t-1)', verticalAlign: 'middle', fontFamily: mono ? "'JetBrains Mono', monospace" : undefined }}>{children}</td>;
-}
-
-function PromiseStatusPill({ status }: { status: Row['status'] }) {
-  const map = {
-    Open:      { bg: 'rgba(217,165,69,.18)',  fg: 'var(--amber)' },
-    Kept:      { bg: 'rgba(83,127,107,.18)',  fg: 'var(--sage)' },
-    Broken:    { bg: 'rgba(178,79,55,.18)',   fg: 'var(--rust)' },
-    Cancelled: { bg: 'rgba(120,130,150,.18)', fg: 'var(--t-2)' },
-  };
-  const s = map[status];
-  return <span style={{ background: s.bg, color: s.fg, fontSize: 10, fontWeight: 700, letterSpacing: '.12em', textTransform: 'uppercase', padding: '4px 8px', borderRadius: 6 }}>{status}</span>;
 }

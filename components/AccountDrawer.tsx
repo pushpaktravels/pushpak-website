@@ -39,7 +39,8 @@ type ModalKind =
   | 'mark-paid'
   | 'credit'
   | 'edit-contact'
-  | 'edit-history';
+  | 'edit-history'
+  | 'edit-legal';
 
 type DrawerData = {
   account: any;
@@ -249,6 +250,16 @@ export function AccountDrawer({ accountId, onClose }: Props) {
           onClose={() => setModal(null)}
           onSaved={() => { setModal(null); refresh(); }} />
       )}
+      {modal === 'edit-legal' && data?.legalCase && (
+        <LegalEditModal legal={data.legalCase}
+          onClose={() => setModal(null)}
+          onSaved={() => { setModal(null); refresh(); }} />
+      )}
+      {modal === 'edit-contact' && a && (
+        <ContactEditModal party={a.party} family={a.family} client={data?.client}
+          onClose={() => setModal(null)}
+          onSaved={() => { setModal(null); refresh(); }} />
+      )}
     </>
   );
 }
@@ -341,13 +352,21 @@ function AccountTab({
   setErr: (s: string | null) => void;
 }) {
   const a = data.account;
-  const openPromises = data.promises.filter(p => p.status === 'Open');
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       {/* Context section — colored left border depending on tier */}
       {a.tier === 'E' && data.legalCase && (
-        <ContextCard tone="rust" title={`Legal case · ${data.legalCase.status}`}>
+        <ContextCard
+          tone="rust"
+          title={`Legal case · ${data.legalCase.status}`}
+          action={
+            <button onClick={() => onAction('edit-legal')} aria-label="Edit legal case" style={{
+              background: 'transparent', border: 'none', cursor: 'pointer',
+              color: 'var(--rust)', padding: 4, display: 'flex',
+            }}><PencilIcon /></button>
+          }
+        >
           <LegalCaseDetails legal={data.legalCase} />
         </ContextCard>
       )}
@@ -356,55 +375,76 @@ function AccountTab({
           <PaymentPlanDetails plan={data.paymentPlan} instalments={data.instalments} />
         </ContextCard>
       )}
-      {(a.tier !== 'D' && a.tier !== 'E' && openPromises.length > 0) && (
-        <ContextCard tone="navy" title={`Promise history (${data.promises.length})`}>
+
+      {/* Promises — always visible with + button in header */}
+      <ContextCard
+        tone="navy"
+        title={data.promises.length > 0 ? `Promises (${data.promises.length})` : 'Promises'}
+        action={
+          <button onClick={() => onAction('add-promise')} aria-label="Add promise" style={{
+            background: 'transparent', border: 'none', cursor: 'pointer',
+            color: 'var(--navy)', padding: 4, display: 'flex',
+          }}><PlusIcon /></button>
+        }
+      >
+        {data.promises.length === 0 ? (
+          <div style={{ color: 'var(--t-3)', fontSize: 13, fontStyle: 'italic' }}>
+            No promises yet. Click the + above to log one, or use "Log Call" and fill the "Promise to pay by" date.
+          </div>
+        ) : (
           <PromiseHistoryDetails promises={data.promises}
             onSettleKept={onSettlePromise}
             onMarkBroken={(id) => quickSettle(id, 'Broken', refresh, setErr)}
             onMarkCancelled={(id) => quickSettle(id, 'Cancelled', refresh, setErr)}
           />
-        </ContextCard>
-      )}
+        )}
+      </ContextCard>
 
-      {/* OUTSTANDING + NEXT ACTION */}
+      {/* OUTSTANDING + NEXT ACTION + AGING — single combined card */}
       <div style={{
-        display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16,
-        padding: '18px 20px', background: '#fff',
-        border: '1px solid var(--line, #e7eaf0)', borderRadius: 12,
+        background: '#fff', border: '1px solid var(--line, #e7eaf0)',
+        borderRadius: 12, overflow: 'hidden',
       }}>
-        <div>
-          <div style={{ fontSize: 10, letterSpacing: '.22em', textTransform: 'uppercase', color: 'var(--t-3)', fontWeight: 700, marginBottom: 6 }}>Outstanding</div>
-          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 26, fontWeight: 700, color: 'var(--navy-deep)', lineHeight: 1 }}>
-            {fmtINR(Number(a.bill || 0))}
+        {/* Top half: Outstanding + Next Action */}
+        <div style={{
+          display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16,
+          padding: '18px 20px',
+        }}>
+          <div>
+            <div style={{ fontSize: 10, letterSpacing: '.22em', textTransform: 'uppercase', color: 'var(--t-3)', fontWeight: 700, marginBottom: 6 }}>Outstanding</div>
+            <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 26, fontWeight: 700, color: 'var(--navy-deep)', lineHeight: 1 }}>
+              {fmtINR(Number(a.bill || 0))}
+            </div>
+            <div style={{ fontSize: 11.5, color: 'var(--t-3)', marginTop: 6 }}>Across {a.exec || '—'}</div>
           </div>
-          <div style={{ fontSize: 11.5, color: 'var(--t-3)', marginTop: 6 }}>Across {a.exec || '—'}</div>
+          <div>
+            <div style={{ fontSize: 10, letterSpacing: '.22em', textTransform: 'uppercase', color: 'var(--t-3)', fontWeight: 700, marginBottom: 6 }}>Next action</div>
+            <NextActionLine account={a} />
+          </div>
         </div>
-        <div>
-          <div style={{ fontSize: 10, letterSpacing: '.22em', textTransform: 'uppercase', color: 'var(--t-3)', fontWeight: 700, marginBottom: 6 }}>Next action</div>
-          <NextActionLine account={a} />
-        </div>
-      </div>
 
-      {/* Aging row */}
-      <div style={{
-        display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 0,
-        padding: '14px 18px', background: '#fff',
-        border: '1px solid var(--line, #e7eaf0)', borderRadius: 12,
-      }}>
-        {[
-          { label: '≤ 30 d', value: a.d30 },
-          { label: '≤ 60 d', value: a.d60 },
-          { label: '≤ 90 d', value: a.d90 },
-          { label: '> 90 d', value: a.d90p },
-        ].map((b, i) => (
-          <div key={b.label} style={{
-            paddingLeft: i === 0 ? 0 : 14,
-            borderLeft: i === 0 ? 'none' : '1px solid var(--line, #e7eaf0)',
-          }}>
-            <div style={{ fontSize: 9.5, letterSpacing: '.22em', textTransform: 'uppercase', color: 'var(--t-3)', fontWeight: 700, marginBottom: 6 }}>{b.label}</div>
-            <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 14, fontWeight: 600, color: Number(b.value) === 0 ? 'var(--t-3)' : 'var(--navy-deep)' }}>{fmtINR(Number(b.value || 0))}</div>
-          </div>
-        ))}
+        {/* Bottom half: Aging buckets (with top divider) */}
+        <div style={{
+          display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 0,
+          padding: '14px 20px',
+          borderTop: '1px solid var(--line, #e7eaf0)',
+          background: 'var(--bg-2, #fafbfd)',
+        }}>
+          {[
+            { label: '≤ 30 d', value: a.d30 },
+            { label: '≤ 60 d', value: a.d60 },
+            { label: '≤ 90 d', value: a.d90 },
+            { label: '> 90 d', value: a.d90p },
+          ].map((b, i) => (
+            <div key={b.label} style={{
+              paddingLeft: i === 0 ? 0 : 14,
+              borderLeft: i === 0 ? 'none' : '1px solid var(--line, #e7eaf0)',
+            }}>
+              <div style={{ fontSize: 9.5, letterSpacing: '.22em', textTransform: 'uppercase', color: 'var(--t-3)', fontWeight: 700, marginBottom: 6 }}>{b.label}</div>
+              <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 14, fontWeight: 600, color: Number(b.value) === 0 ? 'var(--t-3)' : 'var(--navy-deep)' }}>{fmtINR(Number(b.value || 0))}</div>
+            </div>
+          ))}
+        </div>
       </div>
 
       {/* 4 round action buttons */}
@@ -432,18 +472,6 @@ function AccountTab({
             else onAction('edit-contact');
           }} />
       </div>
-
-      {/* Add Promise inline (since promises section moved to context card) */}
-      <button onClick={() => onAction('add-promise')} style={{
-        background: 'transparent', border: '1px dashed var(--line-2)',
-        color: 'var(--t-2)', borderRadius: 10, padding: '12px 14px',
-        fontSize: 12, fontWeight: 600, cursor: 'pointer',
-        letterSpacing: '.04em',
-      }}
-      onMouseEnter={e => (e.currentTarget.style.background = '#fff')}
-      onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
-        ＋ Add new promise
-      </button>
 
       {/* ESCALATION */}
       <Section title="Escalation">
@@ -484,9 +512,10 @@ function AccountTab({
 }
 
 // ─── Context card (Legal / Doubtful / Promise) ───────────────
-function ContextCard({ tone, title, children }: {
+function ContextCard({ tone, title, action, children }: {
   tone: 'rust' | 'amber' | 'navy';
   title: string;
+  action?: React.ReactNode;
   children: React.ReactNode;
 }) {
   const colorMap = {
@@ -501,9 +530,15 @@ function ContextCard({ tone, title, children }: {
       borderRadius: 10, padding: '16px 18px',
     }}>
       <div style={{
-        fontSize: 10, letterSpacing: '.22em', textTransform: 'uppercase',
-        color: colorMap[tone], fontWeight: 700, marginBottom: 12,
-      }}>{title}</div>
+        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        marginBottom: 12,
+      }}>
+        <div style={{
+          fontSize: 10, letterSpacing: '.22em', textTransform: 'uppercase',
+          color: colorMap[tone], fontWeight: 700,
+        }}>{title}</div>
+        {action}
+      </div>
       {children}
     </div>
   );
@@ -884,6 +919,14 @@ function PencilIcon() {
     </svg>
   );
 }
+function PlusIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="12" y1="5" x2="12" y2="19" />
+      <line x1="5" y1="12" x2="19" y2="12" />
+    </svg>
+  );
+}
 
 // ─── Generic modal shell ─────────────────────────────────────
 function ModalShell({ title, onClose, children, footer }: { title: string; onClose: () => void; children: React.ReactNode; footer: React.ReactNode }) {
@@ -1185,4 +1228,122 @@ function BtnPrimary({ children, onClick, disabled }: { children: React.ReactNode
 }
 function BtnSecondary({ children, onClick, disabled }: { children: React.ReactNode; onClick: () => void; disabled?: boolean }) {
   return <button onClick={onClick} disabled={disabled} style={{ background: 'transparent', color: 'var(--t-2)', border: '1px solid var(--line, #e7eaf0)', borderRadius: 8, padding: '10px 18px', fontSize: 12, fontWeight: 600, cursor: disabled ? 'not-allowed' : 'pointer' }}>{children}</button>;
+}
+
+// ─── Legal case edit modal ───────────────────────────────────
+const LEGAL_STATUSES = ['NoticeSent','Filed','InCourt','Settled','Recovered','Dropped','WrittenOff'] as const;
+function LegalEditModal({ legal, onClose, onSaved }: { legal: any; onClose: () => void; onSaved: () => void }) {
+  const [status, setStatus] = useState<string>(legal.status);
+  const [lawyer, setLawyer] = useState(legal.lawyer || '');
+  const [caseRef, setCaseRef] = useState(legal.caseRef || '');
+  const [nextHearing, setNextHearing] = useState(legal.nextHearing ? String(legal.nextHearing).slice(0, 10) : '');
+  const [notes, setNotes] = useState(legal.notes || '');
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function save() {
+    setSaving(true); setErr(null);
+    try {
+      const r = await fetch(`/api/legal/${encodeURIComponent(legal.id)}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          status, lawyer: lawyer || null, caseRef: caseRef || null,
+          nextHearing: nextHearing || null, notes: notes || null,
+        }),
+      }).then(x => x.json());
+      if (!r?.ok) throw new Error(r?.error || 'Failed to save');
+      onSaved();
+    } catch (e: any) { setErr(e.message); setSaving(false); }
+  }
+
+  return (
+    <ModalShell title="Edit legal case" onClose={onClose}
+      footer={<><BtnSecondary onClick={onClose} disabled={saving}>Cancel</BtnSecondary><BtnPrimary onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save'}</BtnPrimary></>}>
+      <Field label="Status">
+        <select value={status} onChange={e => setStatus(e.target.value)} style={inputStyle}>
+          {LEGAL_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+        </select>
+      </Field>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+        <Field label="Lawyer"><input type="text" value={lawyer} onChange={e => setLawyer(e.target.value)} style={inputStyle} /></Field>
+        <Field label="Case reference"><input type="text" value={caseRef} onChange={e => setCaseRef(e.target.value)} style={inputStyle} /></Field>
+      </div>
+      <Field label="Next hearing">
+        <input type="date" value={nextHearing} onChange={e => setNextHearing(e.target.value)} style={inputStyle} />
+      </Field>
+      <Field label="Notes">
+        <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={4} style={{ ...inputStyle, resize: 'vertical' }} />
+      </Field>
+      {err && <div style={{ color: 'var(--rust)', fontSize: 12, marginTop: 8 }}>{err}</div>}
+    </ModalShell>
+  );
+}
+
+// ─── Contact edit modal ──────────────────────────────────────
+function ContactEditModal({
+  party, family, client, onClose, onSaved,
+}: {
+  party: string; family: string | null; client: any | null;
+  onClose: () => void; onSaved: () => void;
+}) {
+  const [phone1, setPhone1] = useState(client?.phone1 || '');
+  const [phone2, setPhone2] = useState(client?.phone2 || '');
+  const [whatsapp, setWhatsapp] = useState(client?.whatsapp || '');
+  const [email, setEmail] = useState(client?.email || '');
+  const [owner, setOwner] = useState(client?.owner || '');
+  const [ap, setAp] = useState(client?.ap || '');
+  const [admin, setAdmin] = useState(client?.admin || '');
+  const [vip, setVip] = useState<'YES' | 'NO'>(client?.vip === 'YES' ? 'YES' : 'NO');
+  const [address, setAddress] = useState(client?.address || '');
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function save() {
+    setSaving(true); setErr(null);
+    try {
+      const r = await fetch(`/api/clients/${encodeURIComponent(party)}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          phone1: phone1 || null, phone2: phone2 || null,
+          whatsapp: whatsapp || null, email: email || null,
+          owner: owner || null, ap: ap || null, admin: admin || null,
+          vip, address: address || null,
+        }),
+      }).then(x => x.json());
+      if (!r?.ok) throw new Error(r?.error || 'Failed to save');
+      onSaved();
+    } catch (e: any) { setErr(e.message); setSaving(false); }
+  }
+
+  return (
+    <ModalShell title="Edit contact details" onClose={onClose}
+      footer={<><BtnSecondary onClick={onClose} disabled={saving}>Cancel</BtnSecondary><BtnPrimary onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save'}</BtnPrimary></>}>
+      <div style={{ fontSize: 11, color: 'var(--t-3)', marginBottom: 14 }}>
+        <strong style={{ color: 'var(--t-2)' }}>{party}</strong>{family ? ` · ${family}` : ''}
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+        <Field label="Phone"><input type="text" value={phone1} onChange={e => setPhone1(e.target.value)} style={inputStyle} /></Field>
+        <Field label="Phone 2"><input type="text" value={phone2} onChange={e => setPhone2(e.target.value)} style={inputStyle} /></Field>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+        <Field label="WhatsApp"><input type="text" value={whatsapp} onChange={e => setWhatsapp(e.target.value)} style={inputStyle} /></Field>
+        <Field label="Email"><input type="text" value={email} onChange={e => setEmail(e.target.value)} style={inputStyle} /></Field>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14 }}>
+        <Field label="Owner"><input type="text" value={owner} onChange={e => setOwner(e.target.value)} style={inputStyle} /></Field>
+        <Field label="AP"><input type="text" value={ap} onChange={e => setAp(e.target.value)} style={inputStyle} /></Field>
+        <Field label="Admin"><input type="text" value={admin} onChange={e => setAdmin(e.target.value)} style={inputStyle} /></Field>
+      </div>
+      <Field label="VIP">
+        <select value={vip} onChange={e => setVip(e.target.value as 'YES' | 'NO')} style={inputStyle}>
+          <option value="NO">NO</option>
+          <option value="YES">YES</option>
+        </select>
+      </Field>
+      <Field label="Address">
+        <textarea value={address} onChange={e => setAddress(e.target.value)} rows={3} style={{ ...inputStyle, resize: 'vertical' }} />
+      </Field>
+      {err && <div style={{ color: 'var(--rust)', fontSize: 12, marginTop: 8 }}>{err}</div>}
+    </ModalShell>
+  );
 }
