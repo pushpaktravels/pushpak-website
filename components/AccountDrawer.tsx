@@ -40,7 +40,8 @@ type ModalKind =
   | 'credit'
   | 'edit-contact'
   | 'edit-history'
-  | 'edit-legal';
+  | 'edit-legal'
+  | 'edit-doubtful';
 
 type DrawerData = {
   account: any;
@@ -255,6 +256,11 @@ export function AccountDrawer({ accountId, onClose }: Props) {
           onClose={() => setModal(null)}
           onSaved={() => { setModal(null); refresh(); }} />
       )}
+      {modal === 'edit-doubtful' && data?.paymentPlan && (
+        <DoubtfulEditModal plan={data.paymentPlan} instalments={data.instalments}
+          onClose={() => setModal(null)}
+          onSaved={() => { setModal(null); refresh(); }} />
+      )}
       {modal === 'edit-contact' && a && (
         <ContactEditModal party={a.party} family={a.family} client={data?.client}
           onClose={() => setModal(null)}
@@ -371,34 +377,47 @@ function AccountTab({
         </ContextCard>
       )}
       {a.tier === 'D' && data.paymentPlan && (
-        <ContextCard tone="amber" title="Doubtful plan">
+        <ContextCard
+          tone="amber"
+          title="Doubtful plan"
+          action={
+            <button onClick={() => onAction('edit-doubtful')} aria-label="Edit doubtful plan" style={{
+              background: 'transparent', border: 'none', cursor: 'pointer',
+              color: 'var(--amber)', padding: 4, display: 'flex',
+            }}><PencilIcon /></button>
+          }
+        >
           <PaymentPlanDetails plan={data.paymentPlan} instalments={data.instalments} />
         </ContextCard>
       )}
 
-      {/* Promises — always visible with + button in header */}
-      <ContextCard
-        tone="navy"
-        title={data.promises.length > 0 ? `Promises (${data.promises.length})` : 'Promises'}
-        action={
-          <button onClick={() => onAction('add-promise')} aria-label="Add promise" style={{
-            background: 'transparent', border: 'none', cursor: 'pointer',
-            color: 'var(--navy)', padding: 4, display: 'flex',
-          }}><PlusIcon /></button>
-        }
-      >
-        {data.promises.length === 0 ? (
-          <div style={{ color: 'var(--t-3)', fontSize: 13, fontStyle: 'italic' }}>
-            No promises yet. Click the + above to log one, or use "Log Call" and fill the "Promise to pay by" date.
-          </div>
-        ) : (
+      {/*
+        Promises card visibility rules:
+          • Tier D (Doubtful)  → never shown (promise events visible in Timeline).
+          • Tier E (Legal)     → never shown (promise events visible in Timeline).
+          • Tier A / B / C     → only when at least one promise exists. First
+                                  promise gets created via Log Call's "Promise
+                                  to pay by" field; the + button in this card
+                                  header is for adding subsequent promises.
+      */}
+      {a.tier !== 'D' && a.tier !== 'E' && data.promises.length > 0 && (
+        <ContextCard
+          tone="navy"
+          title={`Promises (${data.promises.length})`}
+          action={
+            <button onClick={() => onAction('add-promise')} aria-label="Add promise" style={{
+              background: 'transparent', border: 'none', cursor: 'pointer',
+              color: 'var(--navy)', padding: 4, display: 'flex',
+            }}><PlusIcon /></button>
+          }
+        >
           <PromiseHistoryDetails promises={data.promises}
             onSettleKept={onSettlePromise}
             onMarkBroken={(id) => quickSettle(id, 'Broken', refresh, setErr)}
             onMarkCancelled={(id) => quickSettle(id, 'Cancelled', refresh, setErr)}
           />
-        )}
-      </ContextCard>
+        </ContextCard>
+      )}
 
       {/* OUTSTANDING + NEXT ACTION + AGING — single combined card */}
       <div style={{
@@ -1274,6 +1293,114 @@ function LegalEditModal({ legal, onClose, onSaved }: { legal: any; onClose: () =
       <Field label="Notes">
         <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={4} style={{ ...inputStyle, resize: 'vertical' }} />
       </Field>
+      {err && <div style={{ color: 'var(--rust)', fontSize: 12, marginTop: 8 }}>{err}</div>}
+    </ModalShell>
+  );
+}
+
+// ─── Doubtful plan edit modal ────────────────────────────────
+function DoubtfulEditModal({
+  plan, instalments, onClose, onSaved,
+}: {
+  plan: any;
+  instalments: any[];
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [planTotal, setPlanTotal] = useState(String(plan.planTotal ?? ''));
+  const [startDate, setStartDate] = useState(String(plan.startDate ?? '').slice(0, 10));
+  const [cancelled, setCancelled] = useState<boolean>(!!plan.cancelledAt);
+
+  // Per-instalment editable state: status + received amount
+  const [edits, setEdits] = useState<Record<string, { status?: string; received?: string }>>(
+    () => Object.fromEntries(instalments.map(i => [i.id, {}]))
+  );
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  function setInstField(id: string, field: 'status' | 'received', value: string) {
+    setEdits(prev => ({ ...prev, [id]: { ...prev[id], [field]: value } }));
+  }
+
+  async function save() {
+    setSaving(true); setErr(null);
+    try {
+      const instUpdates = instalments
+        .map(i => {
+          const e = edits[i.id] || {};
+          const out: any = { id: i.id };
+          if (e.status !== undefined && e.status !== i.status) out.status = e.status;
+          if (e.received !== undefined && Number(e.received) !== Number(i.received)) out.received = Number(e.received);
+          return out;
+        })
+        .filter(u => Object.keys(u).length > 1); // has id + at least one field
+
+      const body: any = {};
+      if (Number(planTotal) !== Number(plan.planTotal)) body.planTotal = Number(planTotal);
+      if (startDate !== String(plan.startDate).slice(0, 10)) body.startDate = startDate;
+      if (cancelled !== !!plan.cancelledAt) body.cancelled = cancelled;
+      if (instUpdates.length > 0) body.instalments = instUpdates;
+
+      const r = await fetch(`/api/payment-plans/${encodeURIComponent(plan.id)}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }).then(x => x.json());
+      if (!r?.ok) throw new Error(r?.error || 'Failed to save');
+      onSaved();
+    } catch (e: any) { setErr(e.message); setSaving(false); }
+  }
+
+  return (
+    <ModalShell title="Edit doubtful plan" onClose={onClose}
+      footer={<><BtnSecondary onClick={onClose} disabled={saving}>Cancel</BtnSecondary><BtnPrimary onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save'}</BtnPrimary></>}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+        <Field label="Plan total (₹)">
+          <input type="number" min="0" step="1" value={planTotal} onChange={e => setPlanTotal(e.target.value)} style={{ ...inputStyle, fontFamily: "'JetBrains Mono', monospace" }} />
+        </Field>
+        <Field label="Start date">
+          <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} style={inputStyle} />
+        </Field>
+      </div>
+
+      <Field label="Instalments">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {instalments.map(i => {
+            const e = edits[i.id] || {};
+            const curStatus = e.status ?? i.status;
+            const curReceived = e.received ?? String(i.received);
+            return (
+              <div key={i.id} style={{
+                display: 'grid', gridTemplateColumns: '46px 110px 1fr 100px',
+                gap: 10, alignItems: 'center', fontSize: 12,
+                padding: '8px 10px', background: '#fff',
+                border: '1px solid var(--line, #e7eaf0)', borderRadius: 6,
+              }}>
+                <div style={{ fontWeight: 600, color: 'var(--navy-deep)' }}>{i.instNo}/{instalments.length}</div>
+                <div style={{ color: 'var(--t-3)', fontFamily: "'JetBrains Mono', monospace" }}>{fmtDate(i.dueDate)}</div>
+                <select value={curStatus} onChange={e2 => setInstField(i.id, 'status', e2.target.value)} style={{ ...inputStyle, padding: '6px 8px', fontSize: 12 }}>
+                  <option value="Pending">Pending</option>
+                  <option value="Received">Received</option>
+                  <option value="Broken">Broken</option>
+                  <option value="Cancelled">Cancelled</option>
+                </select>
+                <input
+                  type="number" min="0" step="1"
+                  value={curReceived}
+                  onChange={e2 => setInstField(i.id, 'received', e2.target.value)}
+                  placeholder="Received"
+                  style={{ ...inputStyle, padding: '6px 8px', fontSize: 12, fontFamily: "'JetBrains Mono', monospace" }}
+                />
+              </div>
+            );
+          })}
+        </div>
+      </Field>
+
+      <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: cancelled ? 'var(--rust)' : 'var(--t-2)', marginTop: 4 }}>
+        <input type="checkbox" checked={cancelled} onChange={e => setCancelled(e.target.checked)} />
+        Cancel this plan (use when switching to direct legal review or refund)
+      </label>
+
       {err && <div style={{ color: 'var(--rust)', fontSize: 12, marginTop: 8 }}>{err}</div>}
     </ModalShell>
   );
