@@ -387,7 +387,11 @@ function AccountTab({
             }}><PencilIcon /></button>
           }
         >
-          <PaymentPlanDetails plan={data.paymentPlan} instalments={data.instalments} />
+          <PaymentPlanDetails
+            plan={data.paymentPlan}
+            instalments={data.instalments}
+            onSettle={(instId, status) => quickSettleInstalment(data.paymentPlan.id, instId, status, refresh, setErr)}
+          />
         </ContextCard>
       )}
 
@@ -580,7 +584,13 @@ function LegalCaseDetails({ legal }: { legal: any }) {
   );
 }
 
-function PaymentPlanDetails({ plan, instalments }: { plan: any; instalments: any[] }) {
+function PaymentPlanDetails({
+  plan, instalments, onSettle,
+}: {
+  plan: any;
+  instalments: any[];
+  onSettle?: (instId: string, status: 'Received' | 'Broken' | 'Cancelled') => void;
+}) {
   const received = instalments.reduce((n, i) => n + Number(i.received || 0), 0);
   const total = Number(plan.planTotal);
   const remaining = total - received;
@@ -596,20 +606,55 @@ function PaymentPlanDetails({ plan, instalments }: { plan: any; instalments: any
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           {instalments.map(i => (
             <div key={i.id} style={{
-              display: 'grid', gridTemplateColumns: '40px 1fr 90px 90px',
-              gap: 12, alignItems: 'center', fontSize: 12,
-              padding: '6px 0', borderBottom: '1px dashed var(--line, #e7eaf0)',
+              padding: '8px 0', borderBottom: '1px dashed var(--line, #e7eaf0)',
             }}>
-              <div style={{ fontWeight: 600, color: 'var(--navy-deep)' }}>{i.instNo}/{instalments.length}</div>
-              <div style={{ color: 'var(--t-3)' }}>due {fmtDate(i.dueDate)}</div>
-              <div style={{ fontFamily: "'JetBrains Mono', monospace", textAlign: 'right' }}>{fmtINR(Number(i.amount))}</div>
-              <div style={{ textAlign: 'right' }}><MiniPill status={i.status} /></div>
+              <div style={{
+                display: 'grid', gridTemplateColumns: '50px 1fr 100px 100px',
+                gap: 12, alignItems: 'center', fontSize: 12,
+              }}>
+                <div style={{ fontWeight: 600, color: 'var(--navy-deep)' }}>{i.instNo}/{instalments.length}</div>
+                <div style={{ color: 'var(--t-3)' }}>due {fmtDate(i.dueDate)}</div>
+                <div style={{ fontFamily: "'JetBrains Mono', monospace", textAlign: 'right' }}>{fmtINR(Number(i.amount))}</div>
+                <div style={{ textAlign: 'right' }}><MiniPill status={i.status} /></div>
+              </div>
+              {/* Inline action buttons — only for Pending instalments */}
+              {i.status === 'Pending' && onSettle && (
+                <div style={{ display: 'flex', gap: 6, marginTop: 6, paddingLeft: 62 }}>
+                  <InlineBtn color="sage"  onClick={() => onSettle(i.id, 'Received')}>Mark Received</InlineBtn>
+                  <InlineBtn color="rust"  onClick={() => onSettle(i.id, 'Broken')}>Mark Broken</InlineBtn>
+                  <InlineBtn color="muted" onClick={() => onSettle(i.id, 'Cancelled')}>Cancel</InlineBtn>
+                </div>
+              )}
             </div>
           ))}
         </div>
       </div>
     </div>
   );
+}
+
+// ─── Quick settle helper for individual instalments ──────────
+async function quickSettleInstalment(
+  planId: string,
+  instId: string,
+  status: 'Received' | 'Broken' | 'Cancelled',
+  refresh: () => void,
+  setErr: (s: string | null) => void
+) {
+  const label = status === 'Received' ? 'received' : status.toLowerCase();
+  if (!window.confirm(`Mark this instalment as ${label}?`)) return;
+  setErr(null);
+  try {
+    // For 'Received', also set received = amount (full payment assumed)
+    // The endpoint will only update what's sent; user can refine via edit modal later.
+    const body: any = { instalments: [{ id: instId, status }] };
+    const r = await fetch(`/api/payment-plans/${encodeURIComponent(planId)}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }).then(x => x.json());
+    if (!r?.ok) throw new Error(r?.error || 'Failed');
+    refresh();
+  } catch (e: any) { setErr(e.message); }
 }
 
 function PromiseHistoryDetails({
@@ -1299,6 +1344,9 @@ function LegalEditModal({ legal, onClose, onSaved }: { legal: any; onClose: () =
 }
 
 // ─── Doubtful plan edit modal ────────────────────────────────
+type InstEdit = { status?: string; received?: string; amount?: string; dueDate?: string };
+type NewInst = { dueDate: string; amount: string };
+
 function DoubtfulEditModal({
   plan, instalments, onClose, onSaved,
 }: {
@@ -1311,15 +1359,31 @@ function DoubtfulEditModal({
   const [startDate, setStartDate] = useState(String(plan.startDate ?? '').slice(0, 10));
   const [cancelled, setCancelled] = useState<boolean>(!!plan.cancelledAt);
 
-  // Per-instalment editable state: status + received amount
-  const [edits, setEdits] = useState<Record<string, { status?: string; received?: string }>>(
-    () => Object.fromEntries(instalments.map(i => [i.id, {}]))
+  // Per-instalment editable state
+  const [edits, setEdits] = useState<Record<string, InstEdit>>(
+    () => Object.fromEntries(instalments.map(i => [i.id, {} as InstEdit]))
   );
+  // Newly-added instalments (not yet saved)
+  const [newInstalments, setNewInstalments] = useState<NewInst[]>([]);
+
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  function setInstField(id: string, field: 'status' | 'received', value: string) {
+  function setInstField(id: string, field: keyof InstEdit, value: string) {
     setEdits(prev => ({ ...prev, [id]: { ...prev[id], [field]: value } }));
+  }
+  function addNewInstalment() {
+    // Default to a date a month after the latest known due date, amount 0
+    const latest = [...instalments, ...newInstalments.map((n, i) => ({ dueDate: n.dueDate, instNo: instalments.length + i + 1 }))].slice(-1)[0];
+    const baseDate = latest ? new Date(latest.dueDate) : new Date();
+    baseDate.setMonth(baseDate.getMonth() + 1);
+    setNewInstalments(prev => [...prev, { dueDate: baseDate.toISOString().slice(0, 10), amount: '0' }]);
+  }
+  function setNewField(idx: number, field: keyof NewInst, value: string) {
+    setNewInstalments(prev => prev.map((n, i) => i === idx ? { ...n, [field]: value } : n));
+  }
+  function removeNew(idx: number) {
+    setNewInstalments(prev => prev.filter((_, i) => i !== idx));
   }
 
   async function save() {
@@ -1329,17 +1393,22 @@ function DoubtfulEditModal({
         .map(i => {
           const e = edits[i.id] || {};
           const out: any = { id: i.id };
-          if (e.status !== undefined && e.status !== i.status) out.status = e.status;
-          if (e.received !== undefined && Number(e.received) !== Number(i.received)) out.received = Number(e.received);
+          if (e.status   !== undefined && e.status   !== i.status)                     out.status   = e.status;
+          if (e.received !== undefined && Number(e.received) !== Number(i.received))   out.received = Number(e.received);
+          if (e.amount   !== undefined && Number(e.amount)   !== Number(i.amount))     out.amount   = Number(e.amount);
+          if (e.dueDate  !== undefined && e.dueDate !== String(i.dueDate).slice(0, 10)) out.dueDate = e.dueDate;
           return out;
         })
-        .filter(u => Object.keys(u).length > 1); // has id + at least one field
+        .filter(u => Object.keys(u).length > 1);
 
       const body: any = {};
       if (Number(planTotal) !== Number(plan.planTotal)) body.planTotal = Number(planTotal);
       if (startDate !== String(plan.startDate).slice(0, 10)) body.startDate = startDate;
       if (cancelled !== !!plan.cancelledAt) body.cancelled = cancelled;
       if (instUpdates.length > 0) body.instalments = instUpdates;
+      if (newInstalments.length > 0) {
+        body.newInstalments = newInstalments.map(n => ({ dueDate: n.dueDate, amount: Number(n.amount) }));
+      }
 
       const r = await fetch(`/api/payment-plans/${encodeURIComponent(plan.id)}`, {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
@@ -1349,6 +1418,8 @@ function DoubtfulEditModal({
       onSaved();
     } catch (e: any) { setErr(e.message); setSaving(false); }
   }
+
+  const totalCount = instalments.length + newInstalments.length;
 
   return (
     <ModalShell title="Edit doubtful plan" onClose={onClose}
@@ -1362,37 +1433,57 @@ function DoubtfulEditModal({
         </Field>
       </div>
 
-      <Field label="Instalments">
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <Field label={`Instalments (${totalCount})`}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           {instalments.map(i => {
             const e = edits[i.id] || {};
             const curStatus = e.status ?? i.status;
             const curReceived = e.received ?? String(i.received);
+            const curAmount = e.amount ?? String(i.amount);
+            const curDate = e.dueDate ?? String(i.dueDate).slice(0, 10);
             return (
               <div key={i.id} style={{
-                display: 'grid', gridTemplateColumns: '46px 110px 1fr 100px',
-                gap: 10, alignItems: 'center', fontSize: 12,
-                padding: '8px 10px', background: '#fff',
+                display: 'grid', gridTemplateColumns: '42px 130px 110px 1fr 100px',
+                gap: 8, alignItems: 'center', fontSize: 12,
+                padding: '6px 8px', background: '#fff',
                 border: '1px solid var(--line, #e7eaf0)', borderRadius: 6,
               }}>
-                <div style={{ fontWeight: 600, color: 'var(--navy-deep)' }}>{i.instNo}/{instalments.length}</div>
-                <div style={{ color: 'var(--t-3)', fontFamily: "'JetBrains Mono', monospace" }}>{fmtDate(i.dueDate)}</div>
-                <select value={curStatus} onChange={e2 => setInstField(i.id, 'status', e2.target.value)} style={{ ...inputStyle, padding: '6px 8px', fontSize: 12 }}>
+                <div style={{ fontWeight: 600, color: 'var(--navy-deep)' }}>#{i.instNo}</div>
+                <input type="date" value={curDate} onChange={e2 => setInstField(i.id, 'dueDate', e2.target.value)} style={{ ...inputStyle, padding: '5px 7px', fontSize: 11 }} />
+                <input type="number" min="0" step="1" value={curAmount} onChange={e2 => setInstField(i.id, 'amount', e2.target.value)} style={{ ...inputStyle, padding: '5px 7px', fontSize: 11, fontFamily: "'JetBrains Mono', monospace" }} placeholder="Amount" />
+                <select value={curStatus} onChange={e2 => setInstField(i.id, 'status', e2.target.value)} style={{ ...inputStyle, padding: '5px 7px', fontSize: 11 }}>
                   <option value="Pending">Pending</option>
                   <option value="Received">Received</option>
                   <option value="Broken">Broken</option>
                   <option value="Cancelled">Cancelled</option>
                 </select>
-                <input
-                  type="number" min="0" step="1"
-                  value={curReceived}
-                  onChange={e2 => setInstField(i.id, 'received', e2.target.value)}
-                  placeholder="Received"
-                  style={{ ...inputStyle, padding: '6px 8px', fontSize: 12, fontFamily: "'JetBrains Mono', monospace" }}
-                />
+                <input type="number" min="0" step="1" value={curReceived} onChange={e2 => setInstField(i.id, 'received', e2.target.value)} placeholder="Received" style={{ ...inputStyle, padding: '5px 7px', fontSize: 11, fontFamily: "'JetBrains Mono', monospace" }} />
               </div>
             );
           })}
+          {newInstalments.map((n, idx) => (
+            <div key={`new-${idx}`} style={{
+              display: 'grid', gridTemplateColumns: '42px 130px 110px 1fr 32px',
+              gap: 8, alignItems: 'center', fontSize: 12,
+              padding: '6px 8px', background: 'rgba(46,125,92,.08)',
+              border: '1px dashed var(--sage)', borderRadius: 6,
+            }}>
+              <div style={{ fontWeight: 600, color: 'var(--sage)' }}>NEW</div>
+              <input type="date" value={n.dueDate} onChange={e => setNewField(idx, 'dueDate', e.target.value)} style={{ ...inputStyle, padding: '5px 7px', fontSize: 11 }} />
+              <input type="number" min="0" step="1" value={n.amount} onChange={e => setNewField(idx, 'amount', e.target.value)} style={{ ...inputStyle, padding: '5px 7px', fontSize: 11, fontFamily: "'JetBrains Mono', monospace" }} placeholder="Amount" />
+              <div style={{ fontSize: 10, color: 'var(--sage)', letterSpacing: '.14em', textTransform: 'uppercase', fontWeight: 700 }}>Will save as Pending</div>
+              <button onClick={() => removeNew(idx)} aria-label="Remove" style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--rust)', fontSize: 16 }}>×</button>
+            </div>
+          ))}
+          <button type="button" onClick={addNewInstalment} style={{
+            background: 'transparent', border: '1px dashed var(--line-2, #d0d6e0)',
+            color: 'var(--t-2)', borderRadius: 6, padding: '8px',
+            fontSize: 12, fontWeight: 600, cursor: 'pointer', marginTop: 2,
+          }}
+          onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-2, #f6f8fb)')}
+          onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
+            ＋ Add instalment
+          </button>
         </div>
       </Field>
 

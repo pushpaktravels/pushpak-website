@@ -33,15 +33,7 @@ export function AppShell({
   if (error) return (
     <main style={{ padding: 40, color: 'var(--rust)' }}>Failed to load: {error}</main>
   );
-  if (!user) return (
-    <main style={{
-      minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
-      background: 'linear-gradient(180deg, #1A3F7E, #0F2855)', color: '#fff',
-      fontFamily: 'Inter, system-ui, sans-serif',
-    }}>
-      <div style={{ fontSize: 13, opacity: 0.7 }}>Loading…</div>
-    </main>
-  );
+  if (!user) return <BrandedLoader />;
 
   return (
     <>
@@ -52,5 +44,47 @@ export function AppShell({
         <main className="content scroll">{children}</main>
       </div>
     </>
+  );
+}
+
+// ─── Branded loader (shown while /api/me is in-flight) ───────
+// Light paper background + navy logo + thin indeterminate bar.
+// Replaces the previous full-screen navy gradient + "Loading…" text
+// which was disorienting because it briefly took over the whole window
+// on every navigation.
+function BrandedLoader() {
+  return (
+    <main style={{
+      minHeight: '100vh',
+      display: 'flex', flexDirection: 'column',
+      alignItems: 'center', justifyContent: 'center',
+      gap: 22,
+      background: 'var(--paper, #F4F6FA)',
+      fontFamily: 'Inter, system-ui, sans-serif',
+    }}>
+      <img
+        src="/pushpak-logo.png"
+        alt="Pushpak"
+        style={{ height: 64, width: 'auto', opacity: 0.92 }}
+      />
+      <div style={{
+        width: 200, height: 3, borderRadius: 2,
+        background: 'rgba(15,40,85,0.10)', overflow: 'hidden',
+        position: 'relative',
+      }}>
+        <div style={{
+          position: 'absolute', top: 0, bottom: 0, width: '40%',
+          background: 'var(--navy-deep)', borderRadius: 2,
+          animation: 'loaderSlide 1.2s ease-in-out infinite',
+        }} />
+      </div>
+      <style jsx>{`
+        @keyframes loaderSlide {
+          0%   { left: -40%; }
+          60%  { left: 100%; }
+          100% { left: 100%; }
+        }
+      `}</style>
+    </main>
   );
 }
