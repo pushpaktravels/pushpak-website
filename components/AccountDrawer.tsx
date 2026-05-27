@@ -846,13 +846,18 @@ function NextActionLine({ account }: { account: any }) {
 }
 
 // ─── Timeline tab ────────────────────────────────────────────
+// Shows only USER-driven activity (calls, promises, holds, contact
+// edits, etc.) — never the auto-generated rows from a FinBook upload.
+// Refresh entries (source='Refresh') are filtered out; they live in
+// the RefreshLog audit trail instead, where they belong.
 function TimelineTab({ data }: { data: DrawerData }) {
-  if (data.history.length === 0) {
-    return <Empty label="No timeline entries yet" />;
+  const userHistory = data.history.filter(h => (h.source || 'Portal') !== 'Refresh');
+  if (userHistory.length === 0) {
+    return <Empty label="No timeline entries yet. Log a call or add a promise to start." />;
   }
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-      {data.history.map(h => (
+      {userHistory.map(h => (
         <div key={h.id} style={{
           padding: 14, borderRadius: 10, border: '1px solid var(--line, #e7eaf0)',
           background: '#fff',
@@ -881,8 +886,19 @@ function ContactTab({ data, onAction }: { data: DrawerData; onAction: (k: ModalK
   const c = data.client;
   if (!c) {
     return (
-      <div style={{ padding: 16 }}>
-        <Empty label="No client master record" />
+      <div style={{ padding: '32px 16px', textAlign: 'center' }}>
+        <div style={{ fontSize: 13, color: 'var(--t-3)', marginBottom: 14 }}>
+          No contact details on file yet for this party.
+        </div>
+        <button
+          onClick={() => onAction('edit-contact')}
+          style={{
+            padding: '10px 18px', borderRadius: 8,
+            background: 'linear-gradient(180deg,#1A3F7E,#0F2855)', color: '#fff',
+            border: 'none', cursor: 'pointer',
+            fontSize: 11, fontWeight: 700, letterSpacing: '.22em', textTransform: 'uppercase',
+          }}
+        >+ Add contact details</button>
       </div>
     );
   }

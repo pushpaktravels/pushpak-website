@@ -1,7 +1,237 @@
-import { ComingSoon } from '../../components/ComingSoon';
+// ============================================================
+// /portal/worklist — My Worklist (single-user daily action list).
+// ============================================================
+// A filter dropdown at the top lets the user pick a "view":
+//   • All my accounts          (every account in their scope)
+//   • Need follow-up           (nextFu <= today)
+//   • Hold candidates          (onHold = 'Candidate')
+//   • On hold                  (onHold = 'Active')
+//   • 90+ stuck                (d90p > 0, sorted by stuck amount)
+//   • Customer credits         (bill < 0 — advances / refunds)
+//   • Top 20 outstanding       (bill DESC, capped at 20)
+//
+// The /api/accounts endpoint already applies role-based exec
+// visibility, so this view automatically scopes to "my book" for
+// exec/cm roles, and shows everything for owner/admin.
+// ============================================================
+import { useEffect, useMemo, useState } from 'react';
+import { AppShell } from '../../components/AppShell';
+import { AccountDrawer } from '../../components/AccountDrawer';
+import { TierBadge } from '../../components/TierBadge';
+import { fmtINR } from '../../lib/fmt';
+
+type View = 'all' | 'followup' | 'candidates' | 'active-holds' | 'stuck90' | 'credits' | 'top20';
+
+const VIEWS: Array<{ key: View; label: string; hint: string }> = [
+  { key: 'followup',     label: 'Need follow-up',   hint: 'Accounts whose next-followup date has passed' },
+  { key: 'candidates',   label: 'Hold candidates',  hint: 'Flagged for hold, awaiting owner approval' },
+  { key: 'active-holds', label: 'On hold',          hint: 'Bookings currently blocked for these parties' },
+  { key: 'stuck90',      label: '90+ stuck',        hint: 'Accounts with money stuck > 90 days' },
+  { key: 'credits',      label: 'Customer credits', hint: 'Customers in credit — refunds / advances' },
+  { key: 'top20',        label: 'Top 20 outstanding', hint: 'Biggest exposure right now' },
+  { key: 'all',          label: 'All my accounts',  hint: 'Every account in your scope' },
+];
+
+type AccountRow = {
+  id: string; party: string; family: string | null;
+  exec: string | null; cm: string | null; tier: string;
+  alert: string | null; onHold: string | null; stage: string | null;
+  bill: number; d30: number; d60: number; d90: number; d90p: number;
+  nextFu: string | null; lastTouched: string | null;
+};
+
 export default function WorklistPage() {
-  return <ComingSoon
-    title="My Worklist"
-    crumb="My Worklist"
-    blurb="Your daily action list — overdue promises, hold candidates, new high-tier accounts. Implementation lands once an exec uploads their first FinBook export." />;
+  return (
+    <AppShell title="My Worklist" crumb="My Worklist">
+      <Inner />
+    </AppShell>
+  );
+}
+
+function Inner() {
+  const [view, setView] = useState<View>('followup');
+  const [rows, setRows] = useState<AccountRow[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [openId, setOpenId] = useState<string | null>(null);
+
+  // Load every row in the user's scope once (≤500 for any reasonable team).
+  // Filtering happens client-side so changing the view is instant.
+  useEffect(() => {
+    setLoading(true); setError(null);
+    fetch('/api/accounts?limit=500')
+      .then(r => r.json())
+      .then(r => {
+        if (!r?.ok) throw new Error(r?.error || 'Failed to load');
+        setRows((r.data.accounts || []).map((a: any) => ({
+          ...a,
+          bill: Number(a.bill || 0),
+          d30: Number(a.d30 || 0), d60: Number(a.d60 || 0),
+          d90: Number(a.d90 || 0), d90p: Number(a.d90p || 0),
+        })));
+      })
+      .catch(e => setError(e.message))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const filtered = useMemo(() => filterRows(rows, view), [rows, view]);
+  const meta = VIEWS.find(v => v.key === view)!;
+
+  return (
+    <div style={{ maxWidth: 1180, margin: '0 auto', padding: '4px 4px 60px' }}>
+      <div style={{ marginBottom: 22 }}>
+        <h1 style={{ fontSize: 22, fontWeight: 600, color: 'var(--ink)', margin: 0 }}>My Worklist</h1>
+        <p style={{ fontSize: 13, color: 'var(--ink-soft)', marginTop: 6, lineHeight: 1.5 }}>
+          Daily action list — pick a view to focus on what needs your attention.
+        </p>
+      </div>
+
+      <div style={{
+        display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap',
+        marginBottom: 18,
+      }}>
+        <label style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.22em', textTransform: 'uppercase', color: 'var(--ink-soft)' }}>
+          View
+        </label>
+        <select
+          value={view}
+          onChange={e => setView(e.target.value as View)}
+          style={{
+            minWidth: 260, padding: '10px 14px', borderRadius: 8,
+            border: '1px solid rgba(15,40,85,0.18)', background: '#fff',
+            fontSize: 13.5, fontWeight: 600, color: 'var(--ink)',
+            cursor: 'pointer',
+          }}
+        >
+          {VIEWS.map(v => (
+            <option key={v.key} value={v.key}>{v.label}</option>
+          ))}
+        </select>
+        <span style={{ fontSize: 12, color: 'var(--ink-soft)' }}>{meta.hint}</span>
+        <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--ink-soft)' }}>
+          {loading ? 'Loading…' : `${filtered.length} account${filtered.length === 1 ? '' : 's'}`}
+        </span>
+      </div>
+
+      {error && <div style={{ color: 'var(--rust)', padding: 16 }}>Failed: {error}</div>}
+
+      {!loading && filtered.length === 0 && (
+        <div className="view-empty" style={{ padding: 40, textAlign: 'center' }}>
+          <h3 style={{ fontSize: 17, color: 'var(--ink)', margin: 0 }}>Nothing here</h3>
+          <p style={{ color: 'var(--ink-soft)', marginTop: 8 }}>
+            No accounts match "{meta.label}" right now. Try a different view from the dropdown.
+          </p>
+        </div>
+      )}
+
+      {filtered.length > 0 && (
+        <div style={{
+          background: 'rgba(255,255,255,0.6)', border: '1px solid rgba(15,40,85,0.10)',
+          borderRadius: 12, overflow: 'hidden',
+        }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+            <thead>
+              <tr style={{ background: 'rgba(15,40,85,0.04)', borderBottom: '1px solid rgba(15,40,85,0.10)' }}>
+                <Th>Tier</Th>
+                <Th>Party</Th>
+                <Th>Family</Th>
+                <Th align="right">Outstanding</Th>
+                <Th align="right">90+ stuck</Th>
+                <Th>Hold</Th>
+                <Th>Next FU</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map(r => (
+                <tr
+                  key={r.id}
+                  onClick={() => setOpenId(r.id)}
+                  style={{ cursor: 'pointer', borderBottom: '1px solid rgba(15,40,85,0.06)' }}
+                  onMouseEnter={e => (e.currentTarget.style.background = 'rgba(15,40,85,0.04)')}
+                  onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                >
+                  <Td><TierBadge tier={r.tier} /></Td>
+                  <Td><strong style={{ color: 'var(--ink)' }}>{r.party}</strong></Td>
+                  <Td>{r.family || '—'}</Td>
+                  <Td align="right" mono color={r.bill < 0 ? 'var(--sage)' : undefined}>{fmtINR(r.bill)}</Td>
+                  <Td align="right" mono color={r.d90p > 0 ? 'var(--rust)' : 'var(--ink-soft)'}>
+                    {r.d90p > 0 ? fmtINR(r.d90p) : '—'}
+                  </Td>
+                  <Td><HoldPill status={r.onHold} /></Td>
+                  <Td>{r.nextFu ? new Date(r.nextFu).toLocaleDateString('en-IN') : '—'}</Td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <AccountDrawer accountId={openId} onClose={() => setOpenId(null)} />
+    </div>
+  );
+}
+
+function filterRows(rows: AccountRow[], view: View): AccountRow[] {
+  const today = new Date();
+  today.setHours(23, 59, 59, 999);
+  switch (view) {
+    case 'followup':
+      return rows
+        .filter(r => r.nextFu && new Date(r.nextFu) <= today && r.bill > 0)
+        .sort((a, b) => +new Date(a.nextFu!) - +new Date(b.nextFu!));
+    case 'candidates':
+      return rows.filter(r => r.onHold === 'Candidate').sort((a, b) => b.bill - a.bill);
+    case 'active-holds':
+      return rows.filter(r => r.onHold === 'Active').sort((a, b) => b.bill - a.bill);
+    case 'stuck90':
+      return rows.filter(r => r.d90p > 0).sort((a, b) => b.d90p - a.d90p);
+    case 'credits':
+      return rows.filter(r => r.bill < 0).sort((a, b) => a.bill - b.bill);
+    case 'top20':
+      return [...rows].filter(r => r.bill > 0).sort((a, b) => b.bill - a.bill).slice(0, 20);
+    case 'all':
+    default:
+      return [...rows].sort((a, b) => b.bill - a.bill);
+  }
+}
+
+// ─── Presentational bits ──────────────────────────────────────
+function Th({ children, align }: { children: React.ReactNode; align?: 'left' | 'right' }) {
+  return (
+    <th style={{
+      textAlign: align || 'left',
+      padding: '10px 14px', fontSize: 10, letterSpacing: '.16em',
+      textTransform: 'uppercase', color: 'var(--ink-soft)', fontWeight: 700,
+    }}>{children}</th>
+  );
+}
+function Td({ children, align, mono, color }: {
+  children: React.ReactNode; align?: 'left' | 'right'; mono?: boolean; color?: string;
+}) {
+  return (
+    <td style={{
+      textAlign: align || 'left',
+      padding: '12px 14px',
+      color: color || 'var(--ink)',
+      verticalAlign: 'middle',
+      fontFamily: mono ? 'inherit' : undefined,
+      fontVariantNumeric: mono ? 'tabular-nums' : undefined,
+      fontWeight: mono ? 600 : undefined,
+    }}>{children}</td>
+  );
+}
+function HoldPill({ status }: { status: string | null }) {
+  if (!status) return <span style={{ fontSize: 11, color: 'var(--sage)', fontWeight: 600 }}>—</span>;
+  const map: Record<string, { bg: string; fg: string }> = {
+    Active:    { bg: 'rgba(178,79,55,.16)',  fg: 'var(--rust)' },
+    Candidate: { bg: 'rgba(217,165,69,.18)', fg: 'var(--amber, #B58430)' },
+  };
+  const s = map[status] || { bg: 'rgba(120,130,150,.18)', fg: 'var(--ink-soft)' };
+  return (
+    <span style={{
+      background: s.bg, color: s.fg, fontSize: 10, fontWeight: 700,
+      letterSpacing: '.12em', textTransform: 'uppercase',
+      padding: '4px 8px', borderRadius: 6,
+    }}>{status}</span>
+  );
 }

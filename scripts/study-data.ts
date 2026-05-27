@@ -51,7 +51,7 @@ async function main() {
     const stuck = r.d90p > 0 ? ` · ${fmt(r.d90p)} stuck >90d` : '';
     console.log(`  ${fmt(r.bill).padEnd(14)} ${r.party.slice(0, 38).padEnd(40)} tier=${r.tier} fam=${(r.family||'—').slice(0,18).padEnd(18)} ${r.exec || ''}${stuck}`);
   }
-  const sumTop = top.rows.reduce((s, r) => s + r.bill, 0);
+  const sumTop = top.rows.reduce((s: number, r: any) => s + r.bill, 0);
   console.log(`  -- Top 10 = ${fmt(sumTop)} (${pct(sumTop, a.total)} of net outstanding) --`);
 
   console.log('\n========== TOP 10 STUCK IN 90+ ==========');
@@ -61,7 +61,7 @@ async function main() {
   for (const r of stuck.rows) {
     console.log(`  ${fmt(r.d90p).padEnd(14)} ${r.party.slice(0, 40).padEnd(42)} bill=${fmt(r.bill).padStart(11)} tier=${r.tier} ${r.exec || ''}`);
   }
-  const sumStuck = stuck.rows.reduce((s, r) => s + r.d90p, 0);
+  const sumStuck = stuck.rows.reduce((s: number, r: any) => s + r.d90p, 0);
   console.log(`  -- Top 10 stuck = ${fmt(sumStuck)} (${pct(sumStuck, a.d90p)} of all 90+) --`);
 
   console.log('\n========== FAMILY CONCENTRATION (top 12) ==========');

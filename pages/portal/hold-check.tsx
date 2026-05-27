@@ -27,12 +27,71 @@ type Row = {
   creditPeriod: string | null;
 };
 
+type HoldRow = {
+  id: string;            // HoldRecord id
+  party: string;
+  family: string | null;
+  outstanding: number;
+  reason: string;
+  status: 'Candidate' | 'Active';
+  confirmedBy: string | null;
+  confirmedOn: string | null;
+  addedOn: string;
+  accountId: string | null;
+  exec: string | null;
+  tier: string | null;
+  bill: number;
+  d90p: number;
+};
+
 export default function HoldCheckPage() {
   const [q, setQ] = useState('');
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
+
+  // The two boards below the search bar
+  const [candidates, setCandidates] = useState<HoldRow[]>([]);
+  const [active, setActive] = useState<HoldRow[]>([]);
+  const [holdsLoading, setHoldsLoading] = useState(true);
+  const [holdsError, setHoldsError] = useState<string | null>(null);
+  const [actingId, setActingId] = useState<string | null>(null);
+
+  async function loadHolds() {
+    setHoldsLoading(true); setHoldsError(null);
+    try {
+      const r = await fetch('/api/holds/list').then(x => x.json());
+      if (!r?.ok) throw new Error(r?.error || 'Failed to load holds');
+      setCandidates(r.candidates || []);
+      setActive(r.active || []);
+    } catch (e: any) {
+      setHoldsError(e.message);
+    } finally {
+      setHoldsLoading(false);
+    }
+  }
+  useEffect(() => { loadHolds(); }, []);
+
+  async function changeHold(id: string, status: 'Active' | 'Released') {
+    if (actingId) return;
+    const verb = status === 'Active' ? 'approve and activate' : 'release';
+    if (!window.confirm(`Are you sure you want to ${verb} this hold?`)) return;
+    setActingId(id); setHoldsError(null);
+    try {
+      const r = await fetch(`/api/holds/${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status }),
+      }).then(x => x.json());
+      if (!r?.ok) throw new Error(r?.error || 'Failed');
+      await loadHolds();
+    } catch (e: any) {
+      setHoldsError(e.message);
+    } finally {
+      setActingId(null);
+    }
+  }
 
   // Debounced search.
   useEffect(() => {
@@ -83,7 +142,41 @@ export default function HoldCheckPage() {
         </div>
       </div>
 
-      {/* Results */}
+      {/* Hold boards (always shown below the search bar) */}
+      {holdsError && (
+        <div style={{ color: 'var(--rust)', padding: 12, marginBottom: 12, fontSize: 13 }}>
+          Failed to load holds: {holdsError}
+        </div>
+      )}
+      <HoldBoard
+        title="Hold candidates"
+        subtitle="Flagged by execs — pending owner / CM approval"
+        accent="amber"
+        rows={candidates}
+        loading={holdsLoading}
+        actingId={actingId}
+        onOpen={setOpenId}
+        actions={(r) => (
+          <>
+            <BoardBtn variant="approve" onClick={() => changeHold(r.id, 'Active')}>Approve</BoardBtn>
+            <BoardBtn variant="release" onClick={() => changeHold(r.id, 'Released')}>Drop</BoardBtn>
+          </>
+        )}
+      />
+      <HoldBoard
+        title="On hold"
+        subtitle="Bookings currently blocked — release once payment received"
+        accent="rust"
+        rows={active}
+        loading={holdsLoading}
+        actingId={actingId}
+        onOpen={setOpenId}
+        actions={(r) => (
+          <BoardBtn variant="release" onClick={() => changeHold(r.id, 'Released')}>Release</BoardBtn>
+        )}
+      />
+
+      {/* Search results */}
       {error && (
         <div style={{ color: 'var(--rust)', padding: 16 }}>Failed: {error}</div>
       )}
@@ -161,6 +254,126 @@ function Td({ children, align, mono }: { children: React.ReactNode; align?: 'lef
       padding: '12px 14px', color: 'var(--t-1)', verticalAlign: 'middle',
       fontFamily: mono ? "inherit" : undefined,
     }}>{children}</td>
+  );
+}
+
+// ─── Hold boards ──────────────────────────────────────────────
+function HoldBoard({
+  title, subtitle, accent, rows, loading, actingId, onOpen, actions,
+}: {
+  title: string;
+  subtitle: string;
+  accent: 'amber' | 'rust';
+  rows: HoldRow[];
+  loading: boolean;
+  actingId: string | null;
+  onOpen: (id: string) => void;
+  actions: (r: HoldRow) => React.ReactNode;
+}) {
+  const borderColor = accent === 'rust' ? 'rgba(178,79,55,.35)' : 'rgba(217,165,69,.35)';
+  const badgeBg     = accent === 'rust' ? 'rgba(178,79,55,.16)' : 'rgba(217,165,69,.18)';
+  const badgeFg     = accent === 'rust' ? 'var(--rust)' : 'var(--amber, #B58430)';
+
+  const sumOutstanding = rows.reduce((s, r) => s + (r.bill || 0), 0);
+
+  return (
+    <div style={{
+      background: 'rgba(255,255,255,0.60)',
+      border: `1px solid ${borderColor}`,
+      borderRadius: 12, overflow: 'hidden',
+      marginBottom: 18,
+    }}>
+      <div style={{
+        padding: '12px 18px',
+        display: 'flex', alignItems: 'baseline', gap: 12, flexWrap: 'wrap',
+        borderBottom: '1px solid rgba(15,40,85,0.08)',
+      }}>
+        <div style={{
+          padding: '3px 8px', borderRadius: 4,
+          background: badgeBg, color: badgeFg,
+          fontSize: 10, fontWeight: 700, letterSpacing: '.22em', textTransform: 'uppercase',
+        }}>{title}</div>
+        <div style={{ fontSize: 12.5, color: 'var(--ink-soft)' }}>{subtitle}</div>
+        <div style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--ink-soft)' }}>
+          {loading ? 'Loading…' : `${rows.length} party${rows.length === 1 ? '' : 'ies'} · ${fmtINR(sumOutstanding)} exposure`}
+        </div>
+      </div>
+      {!loading && rows.length === 0 && (
+        <div style={{ padding: 24, textAlign: 'center', color: 'var(--ink-soft)', fontSize: 13, fontStyle: 'italic' }}>
+          None right now.
+        </div>
+      )}
+      {rows.length > 0 && (
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+          <thead>
+            <tr style={{ borderBottom: '1px solid rgba(15,40,85,0.06)' }}>
+              <Th>Party</Th>
+              <Th>Reason</Th>
+              <Th align="right">Outstanding</Th>
+              <Th align="right">90+ stuck</Th>
+              <Th>Exec</Th>
+              <Th align="right">Actions</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(r => (
+              <tr
+                key={r.id}
+                style={{ borderBottom: '1px solid rgba(15,40,85,0.04)' }}
+              >
+                <Td>
+                  <button onClick={() => r.accountId && onOpen(r.accountId)}
+                    disabled={!r.accountId}
+                    style={{
+                      background: 'transparent', border: 'none', padding: 0,
+                      cursor: r.accountId ? 'pointer' : 'default',
+                      fontWeight: 600, color: 'var(--navy-deep)',
+                      textAlign: 'left', fontFamily: 'inherit', fontSize: 13,
+                    }}>{r.party}</button>
+                  {r.family && <div style={{ fontSize: 11, color: 'var(--ink-soft)', marginTop: 2 }}>{r.family}</div>}
+                </Td>
+                <Td>
+                  <div style={{ fontSize: 12.5, color: 'var(--ink-soft)' }}>{r.reason}</div>
+                </Td>
+                <Td align="right" mono>{fmtINR(r.bill)}</Td>
+                <Td align="right" mono>
+                  <span style={{ color: r.d90p > 0 ? 'var(--rust)' : 'var(--ink-soft)' }}>
+                    {r.d90p > 0 ? fmtINR(r.d90p) : '—'}
+                  </span>
+                </Td>
+                <Td>{r.exec || '—'}</Td>
+                <Td align="right">
+                  <div style={{
+                    display: 'inline-flex', gap: 6,
+                    opacity: actingId === r.id ? 0.5 : 1,
+                    pointerEvents: actingId === r.id ? 'none' : 'auto',
+                  }}>
+                    {actions(r)}
+                  </div>
+                </Td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
+function BoardBtn({
+  children, onClick, variant,
+}: { children: React.ReactNode; onClick: () => void; variant: 'approve' | 'release' }) {
+  const palette = variant === 'approve'
+    ? { bg: 'rgba(178,79,55,.10)',  border: 'rgba(178,79,55,.4)',  color: 'var(--rust)' }
+    : { bg: 'rgba(46,108,84,.10)',  border: 'rgba(46,108,84,.4)',  color: 'var(--sage, #2E6C54)' };
+  return (
+    <button onClick={onClick} style={{
+      padding: '6px 12px', borderRadius: 6, cursor: 'pointer',
+      background: palette.bg, border: `1px solid ${palette.border}`,
+      color: palette.color,
+      fontSize: 10.5, fontWeight: 700,
+      letterSpacing: '.18em', textTransform: 'uppercase',
+    }}>{children}</button>
   );
 }
 
