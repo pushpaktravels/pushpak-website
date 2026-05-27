@@ -11,3 +11,4 @@ prisma/dev.db-journal
 .vercel
 *.tsbuildinfo
 next-env.d.ts
+pushpak-passwords-*.xlsx
