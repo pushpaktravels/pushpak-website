@@ -19,15 +19,17 @@ type Q = (sql: string, params?: any[]) => Promise<any[]>;
 
 // ─── Bulk INSERT helper ────────────────────────────────────────
 // Builds a single INSERT … SELECT FROM UNNEST(...) query that
-// inserts every row of `rows` in one round-trip.
+// inserts every row of `rows` in one round-trip. Optionally takes an
+// `onConflict` clause so callers can do upsert-style writes when two
+// passes might insert the same row (e.g. familywise + clientwise both
+// creating a party that wasn't in the snapshot).
 async function bulkInsert(
   q: Q,
   table: string,
   rows: any[],
   columns: Array<{ name: string; type: string; get: (r: any) => any }>,
-  // Optional literal expressions appended after the UNNEST columns
-  // (e.g. ts = NOW()). They aren't passed as params.
-  literals: Array<{ name: string; expr: string }> = []
+  literals: Array<{ name: string; expr: string }> = [],
+  onConflict: string = ''
 ) {
   if (rows.length === 0) return;
   const arrays = columns.map(c => rows.map(c.get));
@@ -39,6 +41,7 @@ async function bulkInsert(
     INSERT INTO "${table}" (${allColNames})
     SELECT ${selectCols}
       FROM UNNEST(${placeholders}) AS t(${colAliases})
+    ${onConflict}
   `;
   await q(sql, arrays);
 }
@@ -71,7 +74,8 @@ export async function applyAgewisePlan(q: Q, plan: AgewisePlan, opts: { fileName
   const tierByParty = new Map(plan.tierSuggestions.map(t => [t.party.toUpperCase(), t.to]));
   const history: Parameters<typeof bulkHistory>[1] = [];
 
-  // 1) Bulk CREATE
+  // 1) Bulk CREATE (with ON CONFLICT in case a prior pass in the same
+  // transaction — familywise / clientwise — already created the row)
   if (plan.toCreate.length > 0) {
     const creates = plan.toCreate.map(p => ({
       ...p,
@@ -92,7 +96,15 @@ export async function applyAgewisePlan(q: Q, plan: AgewisePlan, opts: { fileName
         { name: 'lastTouched', expr: 'NOW()' },
         { name: 'createdAt',   expr: 'NOW()' },
         { name: 'updatedAt',   expr: 'NOW()' },
-      ]
+      ],
+      `ON CONFLICT (party) DO UPDATE SET
+         bill = EXCLUDED.bill,
+         d30  = EXCLUDED.d30,
+         d60  = EXCLUDED.d60,
+         d90  = EXCLUDED.d90,
+         d90p = EXCLUDED.d90p,
+         "lastTouched" = NOW(),
+         "updatedAt"   = NOW()`
     );
     for (const p of plan.toCreate) {
       history.push({ party: p.party, action: 'Account created', newValue: `Agewise upload (${opts.fileName})`, outstanding: p.bill });
@@ -256,7 +268,11 @@ export async function applyClientwisePlan(q: Q, plan: ClientwisePlan, opts: { fi
         { name: 'lastTouched', expr: 'NOW()' },
         { name: 'createdAt',   expr: 'NOW()' },
         { name: 'updatedAt',   expr: 'NOW()' },
-      ]
+      ],
+      `ON CONFLICT (party) DO UPDATE SET
+         exec = EXCLUDED.exec,
+         "lastTouched" = NOW(),
+         "updatedAt"   = NOW()`
     );
     for (const c of plan.toCreate) {
       history.push({
@@ -310,7 +326,11 @@ export async function applyFamilywisePlan(q: Q, plan: FamilywisePlan, opts: { fi
         { name: 'lastTouched', expr: 'NOW()' },
         { name: 'createdAt',   expr: 'NOW()' },
         { name: 'updatedAt',   expr: 'NOW()' },
-      ]
+      ],
+      `ON CONFLICT (party) DO UPDATE SET
+         family = EXCLUDED.family,
+         "lastTouched" = NOW(),
+         "updatedAt"   = NOW()`
     );
     for (const c of plan.toCreate) {
       history.push({
