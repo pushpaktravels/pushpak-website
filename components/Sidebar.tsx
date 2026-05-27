@@ -93,7 +93,7 @@ export function Sidebar({ user }: { user: CurrentUser }) {
         <img
           src="/pushpak-logo2.png"
           alt="Pushpak"
-          style={{ height: 44, width: 'auto', objectFit: 'contain', flexShrink: 0 }}
+          style={{ height: 58, width: 'auto', objectFit: 'contain', flexShrink: 0 }}
         />
         <div className="sidebar-brand-text">
           <div className="sidebar-tag" style={{
