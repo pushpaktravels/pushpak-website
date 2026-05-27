@@ -1,133 +1,73 @@
 // ============================================================
-// upload-parser.ts — turn a FinBook XLS/CSV buffer into rows.
+// upload-parser.ts — three dedicated parsers for FinBook exports.
 // ============================================================
-// FinBook + most accounting exports give us a "party-wise outstanding /
-// ageing" sheet. Column headers vary slightly across exports, so we
-// auto-detect by header keyword instead of hard-coding indices.
+// FinBook gives us three different "Net Outstanding Statement"
+// reports. They share the same 6-row banner + a "Description" header
+// row, but the COLUMNS and STRUCTURE differ:
 //
-// Output: { headers, rows, sheetName, columnMap, warnings }
-// where each row is a normalised ParsedAccount with all known fields
-// filled in. Unknown columns get carried through in `extras` so the
-// preview UI can show the user what we ignored.
+//   AGEWISE      (flat)         Description | Bill Amount | Days <= 30 | Days <= 60 | Days <= 90 | Days > 90
+//   CLIENTWISE   (hierarchical) Description | Debit | Credit | Balance
+//                  └─ empty-amount row = CLIENT (exec / owner)
+//                     amount rows under it = parties belonging to that exec
+//                     SubTotal row = end of that exec's section
+//   FAMILYWISE   (hierarchical) Description | Debit | Credit | Balance
+//                  └─ same pattern: empty-amount row = FAMILY group
+//                     Sub-groups (also empty) may be nested — we use the
+//                     most recent empty header as the operational family
+//                     and ignore higher-level group rows.
 //
-// SECURITY: This module never touches the DB. It just parses bytes.
-// Callers (the /api/upload endpoints) own auth, audit, and writes.
+// Each parser returns its own row shape so the commit logic stays clean.
+// All three return a `grandTotal` value lifted from the file's footer
+// so the preview can show "file says ₹6.46 cr — we read ₹6.46 cr ✓".
 // ============================================================
 import * as XLSX from 'xlsx';
 
-export type ParsedAccount = {
+export type ReportType = 'agewise' | 'clientwise' | 'familywise';
+
+export type ParsedAgewise = {
   party: string;
-  family: string | null;
-  exec: string | null;
-  cm: string | null;
-  branch: string | null;
-  bill: number;       // total outstanding
-  d30: number;        // 0-30 bucket
-  d60: number;        // 31-60
-  d90: number;        // 61-90
-  d90p: number;       // 90+
-  creditLimit: number;
-  creditPeriod: string | null;
-  // Anything we couldn't map cleanly:
-  extras: Record<string, string | number | null>;
+  bill: number;     // Bill Amount (sum of all aging buckets, signed)
+  d30: number;      // Days <= 30
+  d60: number;      // Days <= 60   (FinBook column for 31-60)
+  d90: number;      // Days <= 90   (FinBook column for 61-90)
+  d90p: number;     // Days > 90
 };
 
-export type ColumnMap = {
-  party?: number;
-  family?: number;
-  exec?: number;
-  cm?: number;
-  branch?: number;
-  bill?: number;
-  d30?: number;
-  d60?: number;
-  d90?: number;
-  d90p?: number;
-  creditLimit?: number;
-  creditPeriod?: number;
+export type ParsedClientwise = {
+  party: string;
+  exec: string | null;   // the "client" header from FinBook
+  debit: number;
+  credit: number;
+  balance: number;
 };
 
-export type ParseResult = {
-  ok: boolean;
-  error?: string;
-  sheetName?: string;
-  headers?: string[];
-  columnMap?: ColumnMap;
-  rows?: ParsedAccount[];
-  rawRowCount?: number;
-  warnings?: string[];
+export type ParsedFamilywise = {
+  party: string;
+  family: string | null; // the family/group header from FinBook
+  debit: number;
+  credit: number;
+  balance: number;
 };
 
-// ─── Column header keywords ───────────────────────────────────
-// Each known field maps to a list of substring hints. We match
-// case-insensitively against the *header text* of every column.
-// First match wins. Order in the list matters for ambiguity.
-const HEADER_HINTS: Record<keyof ColumnMap, string[]> = {
-  party:        ['party name', 'customer name', 'account name', 'ledger', 'party', 'customer', 'account', 'name'],
-  family:       ['family', 'group', 'parent'],
-  exec:         ['exec', 'executive', 'sales person', 'salesperson', 'rm', 'owner'],
-  cm:           ['collection mgr', 'collection manager', 'cm name', 'cm'],
-  branch:       ['branch', 'location', 'office'],
-  bill:         ['outstanding', 'total due', 'balance', 'total amount', 'closing balance', 'bill'],
-  d30:          ['0-30', '0 to 30', 'd30', '1-30', '0-29', 'current', 'not due'],
-  d60:          ['31-60', '30-60', 'd60', '61-90... no'], // 61-90 handled separately
-  d90:          ['61-90', '60-90', 'd90', '91-120'],
-  d90p:         ['90+', '>90', 'over 90', 'd90+', 'd90p', '120+', '>120', 'above 90', 'beyond'],
-  creditLimit:  ['credit limit', 'limit', 'credit amount'],
-  creditPeriod: ['credit period', 'credit days', 'credit terms', 'terms', 'period'],
+type CommonOk = {
+  ok: true;
+  sheetName: string;
+  headers: string[];
+  rawRowCount: number;
+  grandTotal: number;     // last row's Balance / Bill Amount
+  warnings: string[];
 };
 
-// Substring guard so 60 doesn't match "0-60" twice; we score and
-// pick the most specific hint.
-function detectColumns(headers: string[]): { map: ColumnMap; warnings: string[] } {
-  const map: ColumnMap = {};
-  const warnings: string[] = [];
-  const used = new Set<number>();
+export type ParseResult =
+  | (CommonOk & { type: 'agewise';    rows: ParsedAgewise[] })
+  | (CommonOk & { type: 'clientwise'; rows: ParsedClientwise[]; emptyExecs: string[] })
+  | (CommonOk & { type: 'familywise'; rows: ParsedFamilywise[]; emptyFamilies: string[] })
+  | { ok: false; error: string; headers?: string[]; sheetName?: string; warnings?: string[] };
 
-  // Normalize headers once.
-  const norm = headers.map(h => String(h || '').trim().toLowerCase());
-
-  // For each field, find the best-scoring column.
-  (Object.keys(HEADER_HINTS) as (keyof ColumnMap)[]).forEach((field) => {
-    const hints = HEADER_HINTS[field];
-    let bestIdx = -1;
-    let bestScore = 0;
-    for (let i = 0; i < norm.length; i++) {
-      if (used.has(i)) continue;
-      const h = norm[i];
-      if (!h) continue;
-      for (let s = 0; s < hints.length; s++) {
-        const hint = hints[s];
-        if (h.includes(hint)) {
-          // Earlier hints = higher score. Also reward exact match.
-          const score = (hints.length - s) * 10 + (h === hint ? 5 : 0);
-          if (score > bestScore) {
-            bestScore = score;
-            bestIdx = i;
-          }
-        }
-      }
-    }
-    if (bestIdx >= 0) {
-      map[field] = bestIdx;
-      used.add(bestIdx);
-    }
-  });
-
-  // Sanity warnings.
-  if (map.party === undefined) warnings.push('No "Party / Customer" column detected — every row will be skipped.');
-  if (map.bill === undefined)  warnings.push('No "Outstanding / Balance" column detected — totals will be zero.');
-  if (map.d30 === undefined && map.d60 === undefined && map.d90 === undefined && map.d90p === undefined) {
-    warnings.push('No ageing bucket columns detected — aging will be blank.');
-  }
-
-  return { map, warnings };
-}
-
+// ─── Shared helpers ─────────────────────────────────────────────
 function toNumber(v: any): number {
   if (v == null || v === '') return 0;
   if (typeof v === 'number') return isFinite(v) ? v : 0;
-  // Strip ₹ , spaces, parentheses (accounting negatives)
   const s = String(v).trim();
   if (!s) return 0;
   const negative = /^\(.*\)$/.test(s);
@@ -142,165 +82,284 @@ function toStr(v: any): string {
   return String(v).trim();
 }
 
-// Pick the most likely sheet from a workbook. Preference:
-//   1. Sheet whose name contains "outstanding" / "ageing" / "tracker" / "debtor"
-//   2. Largest non-empty sheet
-function pickSheet(wb: XLSX.WorkBook): string {
-  const names = wb.SheetNames;
-  if (names.length === 0) return '';
-  const keywords = ['outstanding', 'ageing', 'aging', 'tracker', 'debtor', 'party'];
-  for (const kw of keywords) {
-    const hit = names.find(n => n.toLowerCase().includes(kw));
-    if (hit) return hit;
-  }
-  // Largest sheet wins
-  let best = names[0];
-  let bestRows = 0;
-  for (const n of names) {
-    const ref = wb.Sheets[n]?.['!ref'];
-    if (!ref) continue;
-    const range = XLSX.utils.decode_range(ref);
-    const rowCount = range.e.r - range.s.r;
-    if (rowCount > bestRows) { bestRows = rowCount; best = n; }
-  }
-  return best;
-}
-
-// Find the header row. FinBook exports often have 2-6 junk title rows
-// at the top (company name, period, etc.). We scan the first 15 rows
-// and pick the one with the most "header-like" cells (i.e. matches
-// any of our known hints).
-function findHeaderRow(grid: any[][]): number {
-  const maxScan = Math.min(15, grid.length);
-  let bestRow = 0;
-  let bestScore = -1;
-  for (let r = 0; r < maxScan; r++) {
-    const row = grid[r] || [];
-    let score = 0;
-    for (const cell of row) {
-      const s = String(cell || '').trim().toLowerCase();
-      if (!s) continue;
-      for (const hints of Object.values(HEADER_HINTS)) {
-        for (const hint of hints) {
-          if (s.includes(hint)) { score += 1; break; }
-        }
-      }
-    }
-    if (score > bestScore) { bestScore = score; bestRow = r; }
-  }
-  return bestRow;
-}
-
-export function parseWorkbookBuffer(buf: Buffer, opts: { fileName?: string } = {}): ParseResult {
+// Load the workbook → first sheet → 2D grid.
+function loadGrid(buf: Buffer): { sheetName: string; grid: any[][] } | { error: string } {
   let wb: XLSX.WorkBook;
   try {
     wb = XLSX.read(buf, { type: 'buffer', cellDates: false, raw: false });
   } catch (e: any) {
-    return { ok: false, error: `Couldn't open file: ${e.message || 'unknown error'}` };
+    return { error: `Couldn't open file: ${e.message || 'unknown error'}` };
   }
-
-  const sheetName = pickSheet(wb);
-  if (!sheetName) return { ok: false, error: 'Workbook has no sheets.' };
-  const ws = wb.Sheets[sheetName];
-  if (!ws) return { ok: false, error: `Sheet ${sheetName} not found.` };
-
+  const name = wb.SheetNames[0];
+  if (!name) return { error: 'Workbook has no sheets.' };
+  const ws = wb.Sheets[name];
   const grid = XLSX.utils.sheet_to_json<any[]>(ws, {
-    header: 1,
-    defval: '',
-    blankrows: false,
-    raw: false,
+    header: 1, defval: '', blankrows: false, raw: false,
   });
+  if (grid.length === 0) return { error: `Sheet "${name}" is empty.` };
+  return { sheetName: name, grid };
+}
 
-  if (grid.length === 0) {
-    return { ok: false, error: 'Sheet is empty.', sheetName };
+// Find the row containing "Description" in column A. Returns -1 if missing.
+function findFinBookHeaderRow(grid: any[][]): number {
+  const maxScan = Math.min(20, grid.length);
+  for (let i = 0; i < maxScan; i++) {
+    const cell = toStr(grid[i]?.[0]).toLowerCase();
+    if (cell === 'description') return i;
+  }
+  return -1;
+}
+
+// Map a header label to a column index, normalising whitespace.
+function findCol(headers: string[], ...candidates: string[]): number {
+  const norm = headers.map(h => toStr(h).toLowerCase().replace(/\s+/g, ' '));
+  for (const c of candidates) {
+    const target = c.toLowerCase().replace(/\s+/g, ' ');
+    const idx = norm.indexOf(target);
+    if (idx >= 0) return idx;
+  }
+  // Fallback: substring match
+  for (const c of candidates) {
+    const target = c.toLowerCase().replace(/\s+/g, ' ');
+    const idx = norm.findIndex(h => h.includes(target));
+    if (idx >= 0) return idx;
+  }
+  return -1;
+}
+
+// Is this row's amount-cells block all empty? Used to detect group/family
+// header rows in hierarchical reports.
+function amountsAllEmpty(row: any[], cols: number[]): boolean {
+  for (const c of cols) {
+    const v = toStr(row[c]);
+    if (v && parseFloat(v.replace(/[₹,\s]/g, '')) !== 0) return false;
+    if (v && !/^[\d,.\s\-₹()]+$/.test(v)) return false;
+  }
+  // Truly empty cells
+  return cols.every(c => toStr(row[c]) === '');
+}
+
+// Detect the file's grand-total row: party empty, amounts present.
+// Returns the value from the relevant column (or 0 if no clean total).
+function readGrandTotal(grid: any[][], headerRowIdx: number, valueCol: number): number {
+  for (let i = grid.length - 1; i > headerRowIdx; i--) {
+    const row = grid[i] || [];
+    const desc = toStr(row[0]);
+    const v = row[valueCol];
+    if (desc === '' && v !== '' && v != null) {
+      return toNumber(v);
+    }
+  }
+  return 0;
+}
+
+const isSubTotalRow = (desc: string) => /^sub\s*total\b/i.test(desc) || /^total\b/i.test(desc) || /^grand\s*total\b/i.test(desc);
+
+// ─── AGEWISE — flat ──────────────────────────────────────────────
+function parseAgewise(grid: any[][], sheetName: string): ParseResult {
+  const headerRowIdx = findFinBookHeaderRow(grid);
+  if (headerRowIdx < 0) {
+    return { ok: false, error: 'Could not find the "Description" header row in this file. Did you upload the right FinBook report?', sheetName };
+  }
+  const headers = (grid[headerRowIdx] || []).map(toStr);
+  const cParty = 0;
+  const cBill = findCol(headers, 'bill amount', 'bill  amount', 'balance', 'total');
+  const cD30  = findCol(headers, 'days <= 30', 'days<=30', '0-30', 'days < 30', 'd30');
+  const cD60  = findCol(headers, 'days <= 60', 'days<=60', '31-60', 'd60');
+  const cD90  = findCol(headers, 'days <= 90', 'days<=90', '61-90', 'd90');
+  const cD90p = findCol(headers, 'days > 90', 'days>90', '90+', '> 90', 'd90+');
+
+  const warnings: string[] = [];
+  if (cBill < 0) return { ok: false, error: 'No "Bill Amount" column found. This file might not be an Agewise report.', headers, sheetName };
+  if (cD30 < 0 || cD60 < 0 || cD90 < 0 || cD90p < 0) {
+    warnings.push('One or more aging-bucket columns were not detected. Aging breakdown may be incomplete.');
   }
 
-  const headerRowIdx = findHeaderRow(grid);
-  const headers = (grid[headerRowIdx] || []).map((h: any) => String(h || '').trim());
   const dataRows = grid.slice(headerRowIdx + 1);
-
-  if (headers.length === 0) {
-    return { ok: false, error: 'Could not locate header row.', sheetName };
-  }
-
-  const { map, warnings } = detectColumns(headers);
-
-  if (map.party === undefined) {
-    return {
-      ok: false,
-      sheetName,
-      headers,
-      warnings,
-      error: 'No party / customer / account name column was found in the file. Please check your export.',
-    };
-  }
-
-  const rows: ParsedAccount[] = [];
+  const rows: ParsedAgewise[] = [];
+  const byParty = new Map<string, ParsedAgewise>();
   let rawCount = 0;
   for (const r of dataRows) {
     rawCount++;
     if (!Array.isArray(r)) continue;
-    const partyVal = toStr(r[map.party!]);
-    if (!partyVal) continue;
-    // Skip rows that look like totals.
-    const partyLower = partyVal.toLowerCase();
-    if (/^(grand total|total|sub total|subtotal)\b/.test(partyLower)) continue;
-
-    const extras: Record<string, string | number | null> = {};
-    headers.forEach((h, idx) => {
-      // Carry through anything not in the mapped set
-      if (Object.values(map).includes(idx)) return;
-      if (!h) return;
-      const v = r[idx];
-      if (v == null || v === '') return;
-      extras[h] = typeof v === 'number' ? v : toStr(v);
-    });
-
-    rows.push({
-      party:        partyVal,
-      family:       map.family       !== undefined ? (toStr(r[map.family])       || null) : null,
-      exec:         map.exec         !== undefined ? (toStr(r[map.exec])         || null) : null,
-      cm:           map.cm           !== undefined ? (toStr(r[map.cm])           || null) : null,
-      branch:       map.branch       !== undefined ? (toStr(r[map.branch])       || null) : null,
-      bill:         map.bill         !== undefined ? toNumber(r[map.bill])             : 0,
-      d30:          map.d30          !== undefined ? toNumber(r[map.d30])              : 0,
-      d60:          map.d60          !== undefined ? toNumber(r[map.d60])              : 0,
-      d90:          map.d90          !== undefined ? toNumber(r[map.d90])              : 0,
-      d90p:         map.d90p         !== undefined ? toNumber(r[map.d90p])             : 0,
-      creditLimit:  map.creditLimit  !== undefined ? toNumber(r[map.creditLimit])      : 0,
-      creditPeriod: map.creditPeriod !== undefined ? (toStr(r[map.creditPeriod]) || null) : null,
-      extras,
-    });
+    const party = toStr(r[cParty]);
+    if (!party) continue;
+    if (isSubTotalRow(party)) continue;
+    const row: ParsedAgewise = {
+      party,
+      bill: cBill >= 0 ? toNumber(r[cBill]) : 0,
+      d30:  cD30  >= 0 ? toNumber(r[cD30])  : 0,
+      d60:  cD60  >= 0 ? toNumber(r[cD60])  : 0,
+      d90:  cD90  >= 0 ? toNumber(r[cD90])  : 0,
+      d90p: cD90p >= 0 ? toNumber(r[cD90p]) : 0,
+    };
+    // Skip rows that are entirely zero (likely artefacts)
+    if (row.bill === 0 && row.d30 === 0 && row.d60 === 0 && row.d90 === 0 && row.d90p === 0) continue;
+    // Dedup: sum if party appears twice
+    const key = party.toUpperCase();
+    const ex = byParty.get(key);
+    if (ex) {
+      ex.bill += row.bill; ex.d30 += row.d30; ex.d60 += row.d60; ex.d90 += row.d90; ex.d90p += row.d90p;
+    } else {
+      byParty.set(key, row);
+      rows.push(row);
+    }
   }
-
-  // Dedup: if a party appears twice, sum its numeric columns and merge contact-y fields.
-  const merged = new Map<string, ParsedAccount>();
-  for (const r of rows) {
-    const key = r.party.toUpperCase();
-    const ex = merged.get(key);
-    if (!ex) { merged.set(key, r); continue; }
-    ex.bill += r.bill;
-    ex.d30 += r.d30;
-    ex.d60 += r.d60;
-    ex.d90 += r.d90;
-    ex.d90p += r.d90p;
-    ex.family       = ex.family       || r.family;
-    ex.exec         = ex.exec         || r.exec;
-    ex.cm           = ex.cm           || r.cm;
-    ex.branch       = ex.branch       || r.branch;
-    ex.creditLimit  = Math.max(ex.creditLimit, r.creditLimit);
-    ex.creditPeriod = ex.creditPeriod || r.creditPeriod;
-    ex.extras       = { ...ex.extras, ...r.extras };
-  }
-  const deduped = Array.from(merged.values());
 
   return {
-    ok: true,
-    sheetName,
-    headers,
-    columnMap: map,
-    rows: deduped,
+    ok: true, type: 'agewise', sheetName, headers, rows,
     rawRowCount: rawCount,
+    grandTotal: readGrandTotal(grid, headerRowIdx, cBill),
     warnings,
   };
+}
+
+// ─── Hierarchical (clientwise / familywise) ─────────────────────
+type HierarchicalRow = {
+  party: string;
+  group: string | null;
+  debit: number;
+  credit: number;
+  balance: number;
+};
+
+function parseHierarchical(
+  grid: any[][], sheetName: string, label: 'client' | 'family',
+): { rows: HierarchicalRow[]; emptyGroups: string[]; headers: string[]; headerRowIdx: number; rawRowCount: number; warnings: string[]; grandTotal: number } | { error: string; headers?: string[] } {
+  const headerRowIdx = findFinBookHeaderRow(grid);
+  if (headerRowIdx < 0) {
+    return { error: 'Could not find the "Description" header row in this file. Did you upload the right FinBook report?' };
+  }
+  const headers = (grid[headerRowIdx] || []).map(toStr);
+  const cParty   = 0;
+  const cDebit   = findCol(headers, 'debit', 'dr');
+  const cCredit  = findCol(headers, 'credit', 'cr');
+  const cBalance = findCol(headers, 'balance', 'outstanding', 'net', 'amount');
+  if (cBalance < 0 && cDebit < 0 && cCredit < 0) {
+    return { error: 'No Debit / Credit / Balance column found. This file might not be a Clientwise or Familywise report.', headers };
+  }
+  const amtCols = [cDebit, cCredit, cBalance].filter(c => c >= 0);
+
+  const dataRows = grid.slice(headerRowIdx + 1);
+  const rows: HierarchicalRow[] = [];
+  const emptySet = new Set<string>();
+  // currentGroup persists from the most recent empty-amount header until a SubTotal.
+  let currentGroup: string | null = null;
+  let pendingHeader: string | null = null; // accumulates consecutive empty rows
+  let rawCount = 0;
+
+  for (const r of dataRows) {
+    rawCount++;
+    if (!Array.isArray(r)) continue;
+    const desc = toStr(r[cParty]);
+    if (!desc) continue; // blank row → ignore (grand total handled separately)
+    if (isSubTotalRow(desc)) {
+      // close out — any pending header that never got parties is "empty"
+      if (pendingHeader) emptySet.add(pendingHeader);
+      currentGroup = null;
+      pendingHeader = null;
+      continue;
+    }
+    const isEmpty = amountsAllEmpty(r, amtCols);
+    if (isEmpty) {
+      // promote a previous pending header to "empty" before overwriting it
+      if (pendingHeader) emptySet.add(pendingHeader);
+      pendingHeader = desc;
+      continue;
+    }
+    // This is a party row with amounts.
+    // If we had a pendingHeader, it becomes the active group.
+    if (pendingHeader) {
+      currentGroup = pendingHeader;
+      pendingHeader = null;
+    }
+    rows.push({
+      party: desc,
+      group: currentGroup,
+      debit:   cDebit   >= 0 ? toNumber(r[cDebit])   : 0,
+      credit:  cCredit  >= 0 ? toNumber(r[cCredit])  : 0,
+      balance: cBalance >= 0 ? toNumber(r[cBalance]) : 0,
+    });
+  }
+  // Trailing empty header (no parties followed it before EOF)
+  if (pendingHeader) emptySet.add(pendingHeader);
+
+  const warnings: string[] = [];
+  const ungrouped = rows.filter(r => !r.group).length;
+  if (ungrouped > 0) warnings.push(`${ungrouped} row${ungrouped===1?'':'s'} had no ${label} header above them — they'll be ${label === 'client' ? 'left without an exec' : 'left without a family'}.`);
+
+  return {
+    rows,
+    emptyGroups: Array.from(emptySet),
+    headers, headerRowIdx,
+    rawRowCount: rawCount,
+    warnings,
+    grandTotal: readGrandTotal(grid, headerRowIdx, cBalance >= 0 ? cBalance : amtCols[0]),
+  };
+}
+
+function parseClientwise(grid: any[][], sheetName: string): ParseResult {
+  const r = parseHierarchical(grid, sheetName, 'client');
+  if ('error' in r) return { ok: false, error: r.error, headers: r.headers, sheetName };
+  // Dedup by party (sum amounts, keep first exec)
+  const byParty = new Map<string, ParsedClientwise>();
+  const out: ParsedClientwise[] = [];
+  for (const row of r.rows) {
+    const key = row.party.toUpperCase();
+    const ex = byParty.get(key);
+    if (ex) {
+      ex.debit += row.debit; ex.credit += row.credit; ex.balance += row.balance;
+      ex.exec = ex.exec || row.group;
+    } else {
+      const v: ParsedClientwise = {
+        party: row.party, exec: row.group,
+        debit: row.debit, credit: row.credit, balance: row.balance,
+      };
+      byParty.set(key, v); out.push(v);
+    }
+  }
+  return {
+    ok: true, type: 'clientwise', sheetName, headers: r.headers,
+    rows: out, emptyExecs: r.emptyGroups,
+    rawRowCount: r.rawRowCount, grandTotal: r.grandTotal, warnings: r.warnings,
+  };
+}
+
+function parseFamilywise(grid: any[][], sheetName: string): ParseResult {
+  const r = parseHierarchical(grid, sheetName, 'family');
+  if ('error' in r) return { ok: false, error: r.error, headers: r.headers, sheetName };
+  const byParty = new Map<string, ParsedFamilywise>();
+  const out: ParsedFamilywise[] = [];
+  for (const row of r.rows) {
+    const key = row.party.toUpperCase();
+    const ex = byParty.get(key);
+    if (ex) {
+      ex.debit += row.debit; ex.credit += row.credit; ex.balance += row.balance;
+      ex.family = ex.family || row.group;
+    } else {
+      const v: ParsedFamilywise = {
+        party: row.party, family: row.group,
+        debit: row.debit, credit: row.credit, balance: row.balance,
+      };
+      byParty.set(key, v); out.push(v);
+    }
+  }
+  return {
+    ok: true, type: 'familywise', sheetName, headers: r.headers,
+    rows: out, emptyFamilies: r.emptyGroups,
+    rawRowCount: r.rawRowCount, grandTotal: r.grandTotal, warnings: r.warnings,
+  };
+}
+
+// ─── Public entry point ─────────────────────────────────────────
+export function parseFinBook(buf: Buffer, reportType: ReportType): ParseResult {
+  const loaded = loadGrid(buf);
+  if ('error' in loaded) return { ok: false, error: loaded.error };
+  const { sheetName, grid } = loaded;
+  switch (reportType) {
+    case 'agewise':    return parseAgewise(grid, sheetName);
+    case 'clientwise': return parseClientwise(grid, sheetName);
+    case 'familywise': return parseFamilywise(grid, sheetName);
+    default:           return { ok: false, error: `Unknown report type: ${reportType}` };
+  }
 }

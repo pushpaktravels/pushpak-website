@@ -2,12 +2,13 @@
 // upload-multipart.ts — read a single uploaded file off NextApiRequest.
 // ============================================================
 // Pages Router doesn't have a built-in body parser for multipart,
-// so we use formidable. Files are kept in memory (no disk write) and
-// returned as a Buffer the parser can chew on.
+// so we use formidable. Returns the file as a Buffer along with
+// the raw field map so callers can pull additional form data
+// (e.g. reportType) via readFieldString().
 //
 // SECURITY:
-//   - 10 MB cap (FinBook exports are tiny — 200-800 KB usual)
-//   - Accepts only .xlsx / .xls / .csv by content-type or extension
+//   - 10 MB cap (FinBook exports are tiny — ~30-80 KB typical)
+//   - Only .xlsx / .xls / .csv by extension
 //   - Calling endpoint must already have run requireAuth()
 // ============================================================
 import type { NextApiRequest } from 'next';
@@ -24,19 +25,23 @@ export type UploadedFile = {
   mimeType: string;
 };
 
-export async function readUploadedFile(req: NextApiRequest): Promise<UploadedFile> {
+export async function readUploadedFile(
+  req: NextApiRequest
+): Promise<{ file: UploadedFile; fields: formidable.Fields }> {
   const form = formidable({
     multiples: false,
     maxFileSize: MAX_SIZE,
     keepExtensions: true,
   });
 
-  const { files } = await new Promise<{ fields: any; files: any }>((resolve, reject) => {
-    form.parse(req, (err, fields, files) => {
-      if (err) return reject(err);
-      resolve({ fields, files });
-    });
-  });
+  const { fields, files } = await new Promise<{ fields: formidable.Fields; files: formidable.Files }>(
+    (resolve, reject) => {
+      form.parse(req, (err, fields, files) => {
+        if (err) return reject(err);
+        resolve({ fields, files });
+      });
+    }
+  );
 
   const fileField = files.file;
   const file = Array.isArray(fileField) ? fileField[0] : fileField;
@@ -50,13 +55,23 @@ export async function readUploadedFile(req: NextApiRequest): Promise<UploadedFil
   }
 
   const buf = await fs.promises.readFile(file.filepath);
-  // Best-effort cleanup of the temp file
   fs.promises.unlink(file.filepath).catch(() => {});
 
   return {
-    buffer: buf,
-    fileName,
-    size: file.size || buf.length,
-    mimeType: file.mimetype || 'application/octet-stream',
+    file: {
+      buffer: buf,
+      fileName,
+      size: file.size || buf.length,
+      mimeType: file.mimetype || 'application/octet-stream',
+    },
+    fields,
   };
+}
+
+// Pull a single string value out of a formidable Fields map.
+export function readFieldString(fields: formidable.Fields, name: string): string | null {
+  const v = fields[name];
+  if (v == null) return null;
+  if (Array.isArray(v)) return v[0] ?? null;
+  return String(v);
 }

@@ -1,17 +1,35 @@
 // ============================================================
-// upload-diff.ts — diff parsed FinBook rows vs current Account snapshot.
+// upload-diff.ts — diff parsed FinBook rows vs current snapshot.
 // ============================================================
-// Pure logic (no DB writes). Given:
-//   - parsed: ParsedAccount[] from upload-parser
-//   - current: minimal Account snapshot fetched by the caller
-//   - openPromises: open promises (for "promise kept" detection)
-// Returns a structured plan describing exactly what would change.
+// Three builders, one per report type:
 //
-// The caller (commit endpoint) replays the plan inside a single
-// withTransaction so the whole refresh is atomic.
+//   buildAgewisePlan     → primary financial refresh.
+//     • Outstanding + 4 aging buckets on every Account.
+//     • Detects collections (outstanding dropped).
+//     • Marks open Promises Kept (balance fell below promise amount).
+//     • Raises Hold candidates (over credit-limit / heavy 90+).
+//     • Auto-suggests tier (skips parties with manual tierOverride).
+//     • Parties missing from the file → cleared to bill=0.
+//
+//   buildClientwisePlan  → exec assignment only.
+//     • Updates Account.exec for matching parties.
+//     • New parties get created with bill = balance (so they at least
+//       show up in the portal until the next agewise refresh).
+//     • NEVER touches bill on existing parties — that's agewise's job.
+//
+//   buildFamilywisePlan  → family assignment only.
+//     • Updates Account.family for matching parties.
+//     • Same create-with-balance behaviour for missing parties.
+//
+// All three return Plain Old Data + a summary block so the API
+// endpoints can ship a tiny preview to the browser and replay the
+// plan inside one withTransaction on commit.
 // ============================================================
-import type { ParsedAccount } from './upload-parser';
+import type { ParsedAgewise, ParsedClientwise, ParsedFamilywise } from './upload-parser';
 
+const FMT = (n: number) => `₹${Number(n || 0).toLocaleString('en-IN')}`;
+
+// ─── Snapshot row used by the diff builders ────────────────────
 export type CurrentAccount = {
   party: string;
   bill: number;
@@ -34,32 +52,24 @@ export type OpenPromise = {
   outstandingAt: number;
 };
 
-export type DiffPlan = {
-  // Per-account decisions
-  toCreate: ParsedAccount[];
+// ─── AGEWISE plan ──────────────────────────────────────────────
+export type AgewisePlan = {
+  type: 'agewise';
+  toCreate: ParsedAgewise[];
   toUpdate: Array<{
     party: string;
     before: CurrentAccount;
-    after:  Pick<ParsedAccount, 'bill'|'d30'|'d60'|'d90'|'d90p'|'exec'|'cm'|'family'|'branch'|'creditLimit'|'creditPeriod'>;
-    changes: string[]; // human-readable list e.g. ["Outstanding ₹1.2L → ₹0.9L", "Exec VISHAL → VANSHIKA"]
+    after:  Pick<ParsedAgewise, 'bill'|'d30'|'d60'|'d90'|'d90p'>;
+    changes: string[];
   }>;
-  toClose: Array<{ party: string; before: CurrentAccount }>; // present in DB, missing from file, bill > 0
-  // Side-effects
+  toClose: Array<{ party: string; before: CurrentAccount }>;
   collections: Array<{
-    party: string;
-    prevOutstanding: number;
-    newOutstanding: number;
-    amount: number;
-    exec: string | null;
-    cm: string | null;
-    family: string | null;
+    party: string; family: string | null; exec: string | null; cm: string | null;
+    prevOutstanding: number; newOutstanding: number; amount: number;
   }>;
   promisesKept: Array<{ promiseId: string; party: string; outstandingNow: number }>;
-  // New onHold candidates (outstanding > limit, or >90+ bucket has weight)
   newHoldCandidates: Array<{ party: string; outstanding: number; reason: string }>;
-  // Auto-computed tier suggestions (only applied if no tierOverride)
   tierSuggestions: Array<{ party: string; from: string; to: string }>;
-  // Summary numbers
   summary: {
     fileRows: number;
     currentAccounts: number;
@@ -77,11 +87,8 @@ export type DiffPlan = {
   };
 };
 
-// Tier rule: outstanding × age weight → A-E
-// (Keeps the existing scale Vanshika set in v2.)
 function computeTier(bill: number, d30: number, d60: number, d90: number, d90p: number): string {
   if (bill <= 0) return 'A';
-  // If most of the outstanding is in 90+, jump straight to D/E
   const ratio90p = d90p / Math.max(bill, 1);
   const ratio90  = (d90 + d90p) / Math.max(bill, 1);
   if (ratio90p > 0.5 || d90p > 200000) return 'E';
@@ -91,26 +98,23 @@ function computeTier(bill: number, d30: number, d60: number, d90: number, d90p: 
   return 'B';
 }
 
-const FMT = (n: number) => `₹${Number(n || 0).toLocaleString('en-IN')}`;
-
-export function buildDiffPlan(
-  parsed: ParsedAccount[],
+export function buildAgewisePlan(
+  parsed: ParsedAgewise[],
   current: CurrentAccount[],
   openPromises: OpenPromise[],
   opts: { holdLimitMultiplier?: number; holdOver90Plus?: number } = {}
-): DiffPlan {
-  const holdMult  = opts.holdLimitMultiplier ?? 1;
-  const hold90p   = opts.holdOver90Plus      ?? 50000;
+): AgewisePlan {
+  const holdMult = opts.holdLimitMultiplier ?? 1;
+  const hold90p  = opts.holdOver90Plus      ?? 50000;
 
   const byParty = new Map<string, CurrentAccount>();
   current.forEach(c => byParty.set(c.party.toUpperCase(), c));
 
-  const toCreate: ParsedAccount[] = [];
-  const toUpdate: DiffPlan['toUpdate'] = [];
-  const collections: DiffPlan['collections'] = [];
-  const newHoldCandidates: DiffPlan['newHoldCandidates'] = [];
-  const tierSuggestions: DiffPlan['tierSuggestions'] = [];
-
+  const toCreate: ParsedAgewise[] = [];
+  const toUpdate: AgewisePlan['toUpdate'] = [];
+  const collections: AgewisePlan['collections'] = [];
+  const newHoldCandidates: AgewisePlan['newHoldCandidates'] = [];
+  const tierSuggestions: AgewisePlan['tierSuggestions'] = [];
   const seenInFile = new Set<string>();
   let totalOutstanding = 0;
 
@@ -122,141 +126,199 @@ export function buildDiffPlan(
     const cur = byParty.get(key);
     if (!cur) {
       toCreate.push(p);
-      // Hold flag on new accounts with bad age profile
       if (p.d90p > hold90p) {
-        newHoldCandidates.push({
-          party: p.party, outstanding: p.bill,
-          reason: `New account with ${FMT(p.d90p)} in 90+ bucket`,
-        });
+        newHoldCandidates.push({ party: p.party, outstanding: p.bill, reason: `New account with ${FMT(p.d90p)} in 90+ bucket` });
       }
-      // Tier suggestion (always — new account)
-      const suggested = computeTier(p.bill, p.d30, p.d60, p.d90, p.d90p);
-      // No tier override on new accounts, so this is the initial tier
-      // (we surface it but creation will just use this directly).
-      tierSuggestions.push({ party: p.party, from: '—', to: suggested });
+      tierSuggestions.push({ party: p.party, from: '—', to: computeTier(p.bill, p.d30, p.d60, p.d90, p.d90p) });
       continue;
     }
-
-    // Existing — diff
     const changes: string[] = [];
-    if (Math.abs(p.bill - cur.bill) > 0.5)             changes.push(`Outstanding ${FMT(cur.bill)} → ${FMT(p.bill)}`);
-    if (Math.abs(p.d30 - cur.d30) > 0.5)               changes.push(`0-30: ${FMT(cur.d30)} → ${FMT(p.d30)}`);
-    if (Math.abs(p.d60 - cur.d60) > 0.5)               changes.push(`31-60: ${FMT(cur.d60)} → ${FMT(p.d60)}`);
-    if (Math.abs(p.d90 - cur.d90) > 0.5)               changes.push(`61-90: ${FMT(cur.d90)} → ${FMT(p.d90)}`);
-    if (Math.abs(p.d90p - cur.d90p) > 0.5)             changes.push(`90+: ${FMT(cur.d90p)} → ${FMT(p.d90p)}`);
-    if (p.exec   && p.exec   !== cur.exec)             changes.push(`Exec ${cur.exec ?? '—'} → ${p.exec}`);
-    if (p.cm     && p.cm     !== cur.cm)               changes.push(`CM ${cur.cm ?? '—'} → ${p.cm}`);
-    if (p.family && p.family !== cur.family)           changes.push(`Family ${cur.family ?? '—'} → ${p.family}`);
-    if (p.branch && p.branch !== cur.branch)           changes.push(`Branch ${cur.branch ?? '—'} → ${p.branch}`);
-    if (p.creditLimit && Math.abs(p.creditLimit - cur.creditLimit) > 0.5) {
-      changes.push(`Credit limit ${FMT(cur.creditLimit)} → ${FMT(p.creditLimit)}`);
-    }
-
+    if (Math.abs(p.bill - cur.bill) > 0.5) changes.push(`Outstanding ${FMT(cur.bill)} → ${FMT(p.bill)}`);
+    if (Math.abs(p.d30 - cur.d30) > 0.5)   changes.push(`0-30: ${FMT(cur.d30)} → ${FMT(p.d30)}`);
+    if (Math.abs(p.d60 - cur.d60) > 0.5)   changes.push(`31-60: ${FMT(cur.d60)} → ${FMT(p.d60)}`);
+    if (Math.abs(p.d90 - cur.d90) > 0.5)   changes.push(`61-90: ${FMT(cur.d90)} → ${FMT(p.d90)}`);
+    if (Math.abs(p.d90p - cur.d90p) > 0.5) changes.push(`90+: ${FMT(cur.d90p)} → ${FMT(p.d90p)}`);
     if (changes.length > 0) {
       toUpdate.push({
-        party: cur.party,
-        before: cur,
-        after: {
-          bill: p.bill, d30: p.d30, d60: p.d60, d90: p.d90, d90p: p.d90p,
-          exec: p.exec, cm: p.cm, family: p.family, branch: p.branch,
-          creditLimit: p.creditLimit, creditPeriod: p.creditPeriod,
-        },
+        party: cur.party, before: cur,
+        after: { bill: p.bill, d30: p.d30, d60: p.d60, d90: p.d90, d90p: p.d90p },
         changes,
       });
     }
-
-    // Collection detection: outstanding strictly decreased.
     if (p.bill < cur.bill - 0.5) {
       collections.push({
-        party: cur.party,
-        prevOutstanding: cur.bill,
-        newOutstanding: p.bill,
-        amount: cur.bill - p.bill,
-        exec: p.exec ?? cur.exec,
-        cm:   p.cm   ?? cur.cm,
-        family: p.family ?? cur.family,
+        party: cur.party, family: cur.family, exec: cur.exec, cm: cur.cm,
+        prevOutstanding: cur.bill, newOutstanding: p.bill, amount: cur.bill - p.bill,
       });
     }
-
-    // Hold candidate detection
-    const limit = p.creditLimit || cur.creditLimit;
+    const limit = cur.creditLimit;
     if (limit > 0 && p.bill > limit * holdMult && cur.alert !== 'On Hold') {
-      newHoldCandidates.push({
-        party: cur.party, outstanding: p.bill,
-        reason: `Outstanding ${FMT(p.bill)} exceeds credit limit ${FMT(limit)}`,
-      });
+      newHoldCandidates.push({ party: cur.party, outstanding: p.bill, reason: `Outstanding ${FMT(p.bill)} exceeds credit limit ${FMT(limit)}` });
     } else if (p.d90p > hold90p && cur.alert !== 'On Hold') {
-      newHoldCandidates.push({
-        party: cur.party, outstanding: p.bill,
-        reason: `${FMT(p.d90p)} stuck in 90+ bucket`,
-      });
+      newHoldCandidates.push({ party: cur.party, outstanding: p.bill, reason: `${FMT(p.d90p)} stuck in 90+ bucket` });
     }
-
-    // Tier suggestion (only when no override)
     if (!cur.tierOverride) {
-      const suggested = computeTier(p.bill, p.d30, p.d60, p.d90, p.d90p);
-      if (suggested !== cur.tier) {
-        tierSuggestions.push({ party: cur.party, from: cur.tier, to: suggested });
-      }
+      const sug = computeTier(p.bill, p.d30, p.d60, p.d90, p.d90p);
+      if (sug !== cur.tier) tierSuggestions.push({ party: cur.party, from: cur.tier, to: sug });
     }
   }
 
-  // Closures: in DB, not in file. We don't delete — we set bill to 0
-  // and stamp lastTouched. (Deletion would lose history. Keep the row.)
-  const toClose: DiffPlan['toClose'] = [];
+  const toClose: AgewisePlan['toClose'] = [];
   for (const cur of current) {
     if (seenInFile.has(cur.party.toUpperCase())) continue;
-    if (cur.bill <= 0) continue; // Already zero, nothing to do
+    if (cur.bill <= 0) continue;
     toClose.push({ party: cur.party, before: cur });
-    // Also a collection event — the bill went to zero
     collections.push({
-      party: cur.party,
-      prevOutstanding: cur.bill,
-      newOutstanding: 0,
-      amount: cur.bill,
-      exec: cur.exec,
-      cm:   cur.cm,
-      family: cur.family,
+      party: cur.party, family: cur.family, exec: cur.exec, cm: cur.cm,
+      prevOutstanding: cur.bill, newOutstanding: 0, amount: cur.bill,
     });
   }
 
-  // Promises kept: any open promise whose party's new outstanding
-  // is <= the outstanding at the time the promise was logged minus
-  // a tolerance. Simplest definition: outstanding has dropped at all.
   const finalByParty = new Map<string, number>();
   for (const p of parsed) finalByParty.set(p.party.toUpperCase(), p.bill);
   for (const cur of current) {
     if (!finalByParty.has(cur.party.toUpperCase())) finalByParty.set(cur.party.toUpperCase(), 0);
   }
-  const promisesKept: DiffPlan['promisesKept'] = [];
+  const promisesKept: AgewisePlan['promisesKept'] = [];
   for (const prom of openPromises) {
-    const newBill = finalByParty.get(prom.party.toUpperCase());
-    if (newBill === undefined) continue;
-    if (newBill < prom.outstandingAt - 0.5) {
-      promisesKept.push({ promiseId: prom.id, party: prom.party, outstandingNow: newBill });
+    const bill = finalByParty.get(prom.party.toUpperCase());
+    if (bill === undefined) continue;
+    if (bill < prom.outstandingAt - 0.5) {
+      promisesKept.push({ promiseId: prom.id, party: prom.party, outstandingNow: bill });
     }
   }
 
   const prevTotalOutstanding = current.reduce((s, c) => s + Number(c.bill), 0);
   const collectionAmount = collections.reduce((s, c) => s + c.amount, 0);
-
   return {
-    toCreate, toUpdate, toClose,
-    collections, promisesKept, newHoldCandidates, tierSuggestions,
+    type: 'agewise', toCreate, toUpdate, toClose, collections, promisesKept, newHoldCandidates, tierSuggestions,
     summary: {
       fileRows: parsed.length,
       currentAccounts: current.length,
       finalAccounts: current.length + toCreate.length,
-      totalOutstanding,
-      prevTotalOutstanding,
+      totalOutstanding, prevTotalOutstanding,
       delta: totalOutstanding - prevTotalOutstanding,
+      createCount: toCreate.length, updateCount: toUpdate.length, closeCount: toClose.length,
+      collectionCount: collections.length, collectionAmount,
+      holdCount: newHoldCandidates.length, promisesKeptCount: promisesKept.length,
+    },
+  };
+}
+
+// ─── CLIENTWISE plan (exec assignment) ─────────────────────────
+export type ClientwisePlan = {
+  type: 'clientwise';
+  toCreate: Array<{ party: string; exec: string | null; balance: number }>;
+  toUpdate: Array<{ party: string; before: string | null; after: string; }>;
+  unchanged: number;
+  ungroupedRows: Array<{ party: string; balance: number }>;
+  summary: {
+    fileRows: number;
+    distinctExecs: number;
+    createCount: number;
+    updateCount: number;
+    unchanged: number;
+    ungrouped: number;
+  };
+};
+
+export function buildClientwisePlan(
+  parsed: ParsedClientwise[],
+  current: CurrentAccount[],
+): ClientwisePlan {
+  const byParty = new Map<string, CurrentAccount>();
+  current.forEach(c => byParty.set(c.party.toUpperCase(), c));
+  const toCreate: ClientwisePlan['toCreate'] = [];
+  const toUpdate: ClientwisePlan['toUpdate'] = [];
+  const ungrouped: ClientwisePlan['ungroupedRows'] = [];
+  let unchanged = 0;
+  const execs = new Set<string>();
+
+  for (const p of parsed) {
+    if (p.exec) execs.add(p.exec);
+    else ungrouped.push({ party: p.party, balance: p.balance });
+    const cur = byParty.get(p.party.toUpperCase());
+    if (!cur) {
+      toCreate.push({ party: p.party, exec: p.exec, balance: p.balance });
+      continue;
+    }
+    const newExec = p.exec ?? cur.exec;
+    if ((newExec ?? '') !== (cur.exec ?? '')) {
+      toUpdate.push({ party: cur.party, before: cur.exec, after: newExec ?? '' });
+    } else {
+      unchanged++;
+    }
+  }
+
+  return {
+    type: 'clientwise', toCreate, toUpdate, unchanged,
+    ungroupedRows: ungrouped,
+    summary: {
+      fileRows: parsed.length,
+      distinctExecs: execs.size,
       createCount: toCreate.length,
       updateCount: toUpdate.length,
-      closeCount: toClose.length,
-      collectionCount: collections.length,
-      collectionAmount,
-      holdCount: newHoldCandidates.length,
-      promisesKeptCount: promisesKept.length,
+      unchanged,
+      ungrouped: ungrouped.length,
+    },
+  };
+}
+
+// ─── FAMILYWISE plan (family assignment) ───────────────────────
+export type FamilywisePlan = {
+  type: 'familywise';
+  toCreate: Array<{ party: string; family: string | null; balance: number }>;
+  toUpdate: Array<{ party: string; before: string | null; after: string; }>;
+  unchanged: number;
+  ungroupedRows: Array<{ party: string; balance: number }>;
+  summary: {
+    fileRows: number;
+    distinctFamilies: number;
+    createCount: number;
+    updateCount: number;
+    unchanged: number;
+    ungrouped: number;
+  };
+};
+
+export function buildFamilywisePlan(
+  parsed: ParsedFamilywise[],
+  current: CurrentAccount[],
+): FamilywisePlan {
+  const byParty = new Map<string, CurrentAccount>();
+  current.forEach(c => byParty.set(c.party.toUpperCase(), c));
+  const toCreate: FamilywisePlan['toCreate'] = [];
+  const toUpdate: FamilywisePlan['toUpdate'] = [];
+  const ungrouped: FamilywisePlan['ungroupedRows'] = [];
+  let unchanged = 0;
+  const fams = new Set<string>();
+
+  for (const p of parsed) {
+    if (p.family) fams.add(p.family);
+    else ungrouped.push({ party: p.party, balance: p.balance });
+    const cur = byParty.get(p.party.toUpperCase());
+    if (!cur) {
+      toCreate.push({ party: p.party, family: p.family, balance: p.balance });
+      continue;
+    }
+    const newFam = p.family ?? cur.family;
+    if ((newFam ?? '') !== (cur.family ?? '')) {
+      toUpdate.push({ party: cur.party, before: cur.family, after: newFam ?? '' });
+    } else {
+      unchanged++;
+    }
+  }
+
+  return {
+    type: 'familywise', toCreate, toUpdate, unchanged,
+    ungroupedRows: ungrouped,
+    summary: {
+      fileRows: parsed.length,
+      distinctFamilies: fams.size,
+      createCount: toCreate.length,
+      updateCount: toUpdate.length,
+      unchanged,
+      ungrouped: ungrouped.length,
     },
   };
 }
