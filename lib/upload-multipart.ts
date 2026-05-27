@@ -75,3 +75,48 @@ export function readFieldString(fields: formidable.Fields, name: string): string
   if (Array.isArray(v)) return v[0] ?? null;
   return String(v);
 }
+
+// ─── Multiple named files ──────────────────────────────────────
+// For the combined endpoint that takes up to three FinBook exports
+// at once. Returns a map { fieldName: UploadedFile } with only the
+// fields that were actually uploaded.
+export async function readUploadedFiles(
+  req: NextApiRequest,
+  expectedNames: string[],
+): Promise<{ files: Record<string, UploadedFile>; fields: formidable.Fields }> {
+  const form = formidable({
+    multiples: false,
+    maxFileSize: MAX_SIZE,
+    keepExtensions: true,
+  });
+
+  const { fields, files } = await new Promise<{ fields: formidable.Fields; files: formidable.Files }>(
+    (resolve, reject) => {
+      form.parse(req, (err, fields, files) => {
+        if (err) return reject(err);
+        resolve({ fields, files });
+      });
+    }
+  );
+
+  const out: Record<string, UploadedFile> = {};
+  for (const name of expectedNames) {
+    const fileField = files[name];
+    if (!fileField) continue;
+    const f = Array.isArray(fileField) ? fileField[0] : fileField;
+    if (!f) continue;
+    const fileName = f.originalFilename || f.newFilename || name;
+    const lower = fileName.toLowerCase();
+    const ext = lower.slice(lower.lastIndexOf('.'));
+    if (!ALLOWED_EXT.includes(ext)) {
+      throw new Error(`Unsupported file type for ${name}: ${ext}. Please upload .xlsx, .xls, or .csv.`);
+    }
+    const buf = await fs.promises.readFile(f.filepath);
+    fs.promises.unlink(f.filepath).catch(() => {});
+    out[name] = {
+      buffer: buf, fileName, size: f.size || buf.length,
+      mimeType: f.mimetype || 'application/octet-stream',
+    };
+  }
+  return { files: out, fields };
+}
