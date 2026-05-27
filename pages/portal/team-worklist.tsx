@@ -9,7 +9,7 @@
 // Visible cards are scoped by user role server-side; this page
 // just renders whatever /api/team-worklist returns.
 // ============================================================
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { AppShell } from '../../components/AppShell';
 import { AccountDrawer } from '../../components/AccountDrawer';
 import { TierBadge } from '../../components/TierBadge';
@@ -50,6 +50,17 @@ export default function TeamWorklistPage() {
 
   // Drawer state
   const [openId, setOpenId] = useState<string | null>(null);
+
+  // Ref to scroll the drill-down section into view when an exec
+  // card is clicked (otherwise the list sits below 30+ cards and is
+  // easy to miss).
+  const drillRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (selectedExec && drillRef.current) {
+      // Small timeout so the drill-down element exists in the DOM first
+      setTimeout(() => drillRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
+    }
+  }, [selectedExec]);
 
   // Initial summary fetch
   useEffect(() => {
@@ -117,9 +128,10 @@ export default function TeamWorklistPage() {
 
           {/* Drill-down table */}
           {selectedExec && (
-            <div style={{
+            <div ref={drillRef} style={{
               background: 'var(--bg-1, #fff)', border: '1px solid var(--line, #e7eaf0)',
               borderRadius: 12, overflow: 'hidden',
+              scrollMarginTop: 80,
             }}>
               <div style={{
                 padding: '14px 20px', borderBottom: '1px solid var(--line, #e7eaf0)',

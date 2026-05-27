@@ -30,7 +30,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   try {
-    const [totals, tiers, lastRefresh] = await Promise.all([
+    const [totals, tiers, lastRefresh, credits] = await Promise.all([
       query<any>(`
         SELECT
           COALESCE(SUM(bill), 0)::numeric         AS total,
@@ -56,6 +56,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         ORDER BY ts DESC
         LIMIT 1
       `, []),
+      // Customer credits — accounts owing us nothing (bill < 0).
+      // These are advances / unadjusted refunds — the portal hides them
+      // by default so this surfaces them on the Dashboard.
+      query<any>(`
+        SELECT id, party, family, exec,
+               bill::float8 AS bill
+          FROM "Account"
+          ${whereSql ? whereSql + ' AND bill < 0' : 'WHERE bill < 0'}
+          ORDER BY bill ASC
+          LIMIT 50
+      `, whereParams),
     ]);
 
     const t = totals[0] || {};
@@ -78,6 +89,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         lastRefreshAt: refresh?.ts || null,
         lastRefreshBy: refresh?.byWhom || null,
         lastRefreshDelta: refresh?.delta != null ? Number(refresh.delta) : null,
+        credits: credits.map((r: any) => ({
+          id: r.id, party: r.party, family: r.family,
+          exec: r.exec, bill: Number(r.bill),
+        })),
+        creditTotal: credits.reduce((s: number, r: any) => s + Number(r.bill), 0),
       },
     });
   } catch (err: any) {

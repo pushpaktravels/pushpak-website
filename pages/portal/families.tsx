@@ -34,8 +34,10 @@ export default function FamiliesPage() {
   const [accounts, setAccounts] = useState<AccountRow[]>([]);
   const [accLoading, setAccLoading] = useState(false);
   const [openId, setOpenId] = useState<string | null>(null);
+  const [convertingFamily, setConvertingFamily] = useState<string | null>(null);
+  const [convertResult, setConvertResult] = useState<{ family: string; created: number } | null>(null);
 
-  useEffect(() => {
+  function reload() {
     fetch('/api/families')
       .then(r => r.json())
       .then(r => {
@@ -43,7 +45,32 @@ export default function FamiliesPage() {
         setFamilies(r.data.families || []);
       })
       .catch(e => setError(e.message));
-  }, []);
+  }
+  useEffect(() => { reload(); }, []);
+
+  async function convertFamilyToLegal(family: string) {
+    if (!window.confirm(`Create Filed legal cases for every owing account in "${family}"?\n\nAlready-active legal cases are skipped automatically.`)) return;
+    setConvertingFamily(family); setError(null);
+    try {
+      const r = await fetch('/api/legal/bulk-convert', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ family }),
+      }).then(x => x.json());
+      if (!r?.ok) throw new Error(r?.error || 'Conversion failed');
+      setConvertResult({ family, created: r.created });
+      // Reload accounts list if this family is currently expanded
+      if (expanded === family) {
+        // trigger the existing useEffect by toggling
+        setExpanded(null);
+        setTimeout(() => setExpanded(family), 50);
+      }
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setConvertingFamily(null);
+    }
+  }
 
   useEffect(() => {
     if (!expanded) { setAccounts([]); return; }
@@ -72,16 +99,33 @@ export default function FamiliesPage() {
         title="No families yet"
         body="Once accounts are uploaded with family attribution, the aggregated view appears here." />}
 
+      {convertResult && (
+        <div style={{
+          padding: '12px 16px', marginBottom: 14, borderRadius: 10,
+          background: 'rgba(46,108,84,0.10)', border: '1px solid rgba(46,108,84,0.32)',
+          color: 'var(--ink)', fontSize: 13,
+        }}>
+          ✓ {convertResult.created} account{convertResult.created === 1 ? '' : 's'} from <b>{convertResult.family}</b> now have Filed legal cases. View them in the Legal Ledger.
+          <button onClick={() => setConvertResult(null)}
+            style={{ background:'transparent', border:'none', color: 'var(--ink-soft)', cursor:'pointer', marginLeft: 12, fontSize: 11, fontWeight: 700, letterSpacing: '.18em', textTransform: 'uppercase' }}>Dismiss</button>
+        </div>
+      )}
+
       {families && families.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           {families.map(f => {
             const isOpen = expanded === f.family;
+            const isLegalFamily = /^legal[\s\-]/i.test(f.family);
             return (
               <div key={f.family} style={{
                 background: 'var(--bg-1, #fff)', border: '1px solid var(--line, #e7eaf0)',
                 borderRadius: 12, overflow: 'hidden',
               }}>
-                <button onClick={() => setExpanded(isOpen ? null : f.family)} style={{
+                <div
+                  role="button" tabIndex={0}
+                  onClick={() => setExpanded(isOpen ? null : f.family)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setExpanded(isOpen ? null : f.family); } }}
+                  style={{
                   width: '100%', textAlign: 'left', background: 'transparent', border: 'none',
                   cursor: 'pointer', padding: 18, display: 'flex', alignItems: 'center', gap: 16,
                 }}>
@@ -106,7 +150,24 @@ export default function FamiliesPage() {
                     <div style={{ fontFamily: "inherit", fontSize: 16, fontWeight: 600, color: 'var(--navy-deep)' }}>{fmtINR(f.totalOutstanding)}</div>
                     <div style={{ fontSize: 10, color: 'var(--t-3)', letterSpacing: '.18em', textTransform: 'uppercase', fontWeight: 600, marginTop: 2 }}>Outstanding</div>
                   </div>
-                </button>
+                  {isLegalFamily && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); convertFamilyToLegal(f.family); }}
+                      disabled={convertingFamily === f.family}
+                      title={`Create Filed legal cases for every owing account in ${f.family}`}
+                      style={{
+                        marginLeft: 12, padding: '8px 14px', borderRadius: 8,
+                        background: 'rgba(178,79,55,.10)', border: '1px solid rgba(178,79,55,.4)',
+                        color: 'var(--rust)', fontSize: 10.5, fontWeight: 700,
+                        letterSpacing: '.18em', textTransform: 'uppercase', cursor: 'pointer',
+                        whiteSpace: 'nowrap',
+                        opacity: convertingFamily === f.family ? 0.5 : 1,
+                      }}
+                    >
+                      {convertingFamily === f.family ? 'Converting…' : 'Convert to Legal'}
+                    </button>
+                  )}
+                </div>
 
                 {isOpen && (
                   <div style={{ borderTop: '1px solid var(--line, #e7eaf0)' }}>

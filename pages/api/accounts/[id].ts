@@ -115,6 +115,11 @@ const PatchBody = z.object({
   creditLimit:   z.number().nonnegative().max(1e12).optional(),
   creditPeriod:  z.string().max(60).nullable().optional(),
   onTimePct:     z.string().max(20).nullable().optional(),
+  // Manual family / exec reassignment — both set the corresponding
+  // override column so future Familywise / Clientwise refreshes
+  // don't wipe the change.
+  family:        z.string().max(200).nullable().optional(),
+  exec:          z.string().max(200).nullable().optional(),
 });
 
 const TIER_LABEL: Record<string, string> = {
@@ -202,6 +207,21 @@ async function handlePatch(req: NextApiRequest, res: NextApiResponse, user: any,
     sets.push(`"onTimePct" = $${i++}`);
     params.push(body.onTimePct);
     historyEntries.push({ action: 'On-time pct updated', oldValue: acct.onTimePct, newValue: body.onTimePct });
+  }
+  if (body.family !== undefined && body.family !== acct.family) {
+    sets.push(`family = $${i++}`);
+    params.push(body.family);
+    // Mirror to familyOverride so refresh won't undo this
+    sets.push(`"familyOverride" = $${i++}`);
+    params.push(body.family);
+    historyEntries.push({ action: 'Family reassigned (manual)', oldValue: acct.family, newValue: body.family });
+  }
+  if (body.exec !== undefined && body.exec !== acct.exec) {
+    sets.push(`exec = $${i++}`);
+    params.push(body.exec);
+    sets.push(`"execOverride" = $${i++}`);
+    params.push(body.exec);
+    historyEntries.push({ action: 'Exec reassigned (manual)', oldValue: acct.exec, newValue: body.exec });
   }
 
   if (sets.length === 0) {

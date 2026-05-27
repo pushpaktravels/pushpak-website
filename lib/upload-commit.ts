@@ -284,10 +284,13 @@ export async function applyClientwisePlan(q: Q, plan: ClientwisePlan, opts: { fi
   }
 
   if (plan.toUpdate.length > 0) {
+    // Skip when execOverride is set — preserves any manual reassignment
+    // made through the portal.
     await q(
       `UPDATE "Account" AS a SET exec=u.exec, "lastTouched"=NOW(), "updatedAt"=NOW()
          FROM UNNEST($1::text[], $2::text[]) AS u(party, exec)
-        WHERE a.party = u.party`,
+        WHERE a.party = u.party
+          AND (a."execOverride" IS NULL OR a."execOverride" = '')`,
       [plan.toUpdate.map(u => u.party), plan.toUpdate.map(u => u.after)]
     );
     for (const u of plan.toUpdate) {
@@ -342,10 +345,13 @@ export async function applyFamilywisePlan(q: Q, plan: FamilywisePlan, opts: { fi
   }
 
   if (plan.toUpdate.length > 0) {
+    // Skip when familyOverride is set — preserves manual family
+    // reassignment made through the portal.
     await q(
       `UPDATE "Account" AS a SET family=u.family, "lastTouched"=NOW(), "updatedAt"=NOW()
          FROM UNNEST($1::text[], $2::text[]) AS u(party, family)
-        WHERE a.party = u.party`,
+        WHERE a.party = u.party
+          AND (a."familyOverride" IS NULL OR a."familyOverride" = '')`,
       [plan.toUpdate.map(u => u.party), plan.toUpdate.map(u => u.after)]
     );
     for (const u of plan.toUpdate) {

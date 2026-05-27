@@ -513,6 +513,27 @@ function AccountTab({
         />
       </Section>
 
+      {/* CREDIT POLICY — inline pencil-edit opens the existing CreditModal */}
+      <Section
+        title="Credit policy"
+        action={<button onClick={() => onAction('credit')} aria-label="Edit credit policy" style={{
+          background: 'transparent', border: 'none', cursor: 'pointer',
+          color: 'var(--t-3)', padding: 4,
+        }}><PencilIcon /></button>}
+      >
+        <KV
+          label="Credit limit"
+          value={Number(a.creditLimit) > 0 ? `₹${Number(a.creditLimit).toLocaleString('en-IN')}` : 'Not set'}
+          pill={
+            Number(a.creditLimit) > 0 && Number(a.bill) > Number(a.creditLimit)
+              ? { label: 'OVER LIMIT', tone: 'rust' }
+              : null
+          }
+        />
+        <KV label="Credit period" value={a.creditPeriod || 'Not set'} />
+        <KV label="On-time payment" value={a.onTimePct || '—'} />
+      </Section>
+
       {/* HISTORY (freeform) */}
       <Section
         title="History"

@@ -5,7 +5,12 @@
 // ============================================================
 import { useEffect, useState } from 'react';
 import { AppShell } from '../components/AppShell';
+import { AccountDrawer } from '../components/AccountDrawer';
 import { fmtINR, fmtRelative } from '../lib/fmt';
+
+type CreditRow = {
+  id: string; party: string; family: string | null; exec: string | null; bill: number;
+};
 
 type DashboardData = {
   total: number;
@@ -17,12 +22,15 @@ type DashboardData = {
   lastRefreshAt: string | null;
   lastRefreshBy: string | null;
   lastRefreshDelta: number | null;
+  credits: CreditRow[];
+  creditTotal: number;
 };
 
 export default function DashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [openId, setOpenId] = useState<string | null>(null);
 
   useEffect(() => {
     fetch('/api/dashboard')
@@ -108,6 +116,53 @@ export default function DashboardPage() {
             </div>
           </div>
 
+          {/* ── CUSTOMER CREDITS (advances / refunds) ── */}
+          {data.credits && data.credits.length > 0 && (
+            <div className="kpi" style={{ marginTop: 18, padding: 0, overflow: 'hidden' }}>
+              <div style={{
+                padding: '14px 18px', borderBottom: '1px solid var(--line, #e7eaf0)',
+                display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap',
+              }}>
+                <div className="kpi-label" style={{ margin: 0 }}>Customer Credits</div>
+                <div style={{ fontSize: 12.5, color: 'var(--ink-soft)' }}>
+                  Customers who owe nothing — these are advances or pending refunds
+                </div>
+                <div style={{ marginLeft: 'auto', fontFamily: 'inherit', fontSize: 16, fontWeight: 700, color: 'var(--sage, #2E6C54)' }}>
+                  {fmtINR(Math.abs(data.creditTotal))}
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--ink-soft)', letterSpacing: '.18em', textTransform: 'uppercase', fontWeight: 700 }}>
+                  {data.credits.length} parties
+                </div>
+              </div>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
+                <thead>
+                  <tr style={{ background: 'rgba(15,40,85,0.04)' }}>
+                    <th style={thStyle}>Party</th>
+                    <th style={thStyle}>Family</th>
+                    <th style={thStyle}>Exec</th>
+                    <th style={{ ...thStyle, textAlign: 'right' }}>Credit available</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.credits.map(c => (
+                    <tr key={c.id}
+                      onClick={() => setOpenId(c.id)}
+                      style={{ cursor: 'pointer', borderBottom: '1px solid rgba(15,40,85,0.06)' }}
+                      onMouseEnter={e => (e.currentTarget.style.background = 'rgba(46,108,84,0.05)')}
+                      onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
+                      <td style={tdStyle}><strong style={{ color: 'var(--navy-deep)' }}>{c.party}</strong></td>
+                      <td style={tdStyle}>{c.family || '—'}</td>
+                      <td style={tdStyle}>{c.exec || '—'}</td>
+                      <td style={{ ...tdStyle, textAlign: 'right', fontFamily: 'inherit', fontWeight: 700, color: 'var(--sage, #2E6C54)', fontVariantNumeric: 'tabular-nums' }}>
+                        {fmtINR(Math.abs(c.bill))}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
           {/* ── EMPTY STATE NOTE while migration pending ── */}
           {data.accounts === 0 && (
             <div className="view-empty" style={{ marginTop: 24 }}>
@@ -121,6 +176,17 @@ export default function DashboardPage() {
           )}
         </>
       )}
+      <AccountDrawer accountId={openId} onClose={() => setOpenId(null)} />
     </AppShell>
   );
 }
+
+const thStyle: React.CSSProperties = {
+  textAlign: 'left', padding: '10px 14px', fontSize: 10,
+  letterSpacing: '.16em', textTransform: 'uppercase',
+  color: 'var(--ink-soft)', fontWeight: 700,
+};
+const tdStyle: React.CSSProperties = {
+  textAlign: 'left', padding: '11px 14px',
+  color: 'var(--ink)', verticalAlign: 'middle',
+};
