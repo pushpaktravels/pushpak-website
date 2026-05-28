@@ -59,17 +59,25 @@ export function AppShell({
   // Idle auto-logout. Default 30 min — owner can tweak via the
   // SESSION_IDLE_MINUTES Setting. Any mousemove / keydown / click /
   // scroll / touchstart resets the timer.
+  //
+  // The same listeners feed the activity-tracker below: lastInputRef
+  // records the most recent input timestamp so the heartbeat only
+  // fires when both (tab visible) AND (input within last 90s).
+  const lastInputRef = useRef<number>(Date.now());
   useEffect(() => {
     if (!user) return;
     let timer: any;
-    const IDLE_MS = 30 * 60 * 1000; // 30 min default
+    const IDLE_MS = 30 * 60 * 1000;
     function logoutNow() {
       sessionStorage.removeItem(USER_CACHE_KEY);
       fetch('/api/logout', { method: 'POST' }).finally(() => {
         router.replace('/login?reason=idle');
       });
     }
-    function reset() { clearTimeout(timer); timer = setTimeout(logoutNow, IDLE_MS); }
+    function reset() {
+      lastInputRef.current = Date.now();
+      clearTimeout(timer); timer = setTimeout(logoutNow, IDLE_MS);
+    }
     const events: (keyof WindowEventMap)[] = ['mousemove', 'keydown', 'click', 'scroll', 'touchstart'];
     events.forEach(ev => window.addEventListener(ev, reset, { passive: true }));
     reset();
@@ -78,6 +86,35 @@ export function AppShell({
       events.forEach(ev => window.removeEventListener(ev, reset));
     };
   }, [user, router]);
+
+  // Active-time heartbeat — fires every 30s ONLY when:
+  //   1. the tab is currently visible (not in background)
+  //   2. there was an input event within the last 90 seconds
+  // The server side computes elapsed-since-last-ping and adds it to
+  // the user's row in ActivityDay (capped at 90s per ping). This
+  // means walking away from the laptop stops the clock automatically.
+  useEffect(() => {
+    if (!user) return;
+    const PING_EVERY_MS = 30_000;
+    const ACTIVE_WINDOW_MS = 90_000;
+    let id: any;
+
+    function tick() {
+      if (document.visibilityState !== 'visible') return;
+      if (Date.now() - lastInputRef.current > ACTIVE_WINDOW_MS) return;
+      // Fire and forget — failure is fine, the next ping will retry
+      fetch('/api/activity/ping', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ page: router.pathname || '/' }),
+        keepalive: true,
+      }).catch(() => {});
+    }
+    // Fire one immediately so the "online" indicator updates fast
+    tick();
+    id = setInterval(tick, PING_EVERY_MS);
+    return () => clearInterval(id);
+  }, [user, router.pathname]);
 
   if (error) return (
     <main style={{ padding: 40, color: 'var(--rust)' }}>Failed to load: {error}</main>
