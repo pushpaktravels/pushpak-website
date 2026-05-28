@@ -31,7 +31,7 @@ type AccountRow = {
   onHold: string | null; stage: string | null;
 };
 
-type SortKey = 'bill' | 'party' | 'tier' | 'onHold';
+type SortKey = 'family' | 'bill' | 'party' | 'tier' | 'onHold';
 type SortDir = 'asc' | 'desc';
 
 export default function TeamWorklistPage() {
@@ -42,9 +42,11 @@ export default function TeamWorklistPage() {
   const [loadingExec, setLoadingExec] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
 
-  // Sort state (per-row); applied client-side
-  const [sortKey, setSortKey] = useState<SortKey>('bill');
-  const [sortDir, setSortDir] = useState<SortDir>('desc');
+  // Sort state (per-row); applied client-side. Default = family so
+  // accounts in the same family cluster together inside each exec's
+  // drill-down.
+  const [sortKey, setSortKey] = useState<SortKey>('family');
+  const [sortDir, setSortDir] = useState<SortDir>('asc');
 
   useEffect(() => {
     fetch('/api/team-worklist')
@@ -150,6 +152,8 @@ function ExecAccordionRow({
     arr.sort((a, b) => {
       let av: any; let bv: any;
       switch (sortKey) {
+        case 'family':  av = (a.family || 'zzz').toLowerCase();
+                        bv = (b.family || 'zzz').toLowerCase(); break;
         case 'bill':    av = Number(a.bill || 0); bv = Number(b.bill || 0); break;
         case 'party':   av = a.party.toLowerCase(); bv = b.party.toLowerCase(); break;
         case 'tier':    av = a.tier; bv = b.tier; break;
@@ -157,10 +161,25 @@ function ExecAccordionRow({
       }
       if (av < bv) return sortDir === 'asc' ? -1 : 1;
       if (av > bv) return sortDir === 'asc' ?  1 : -1;
+      // Family ties → biggest bill first inside the group
+      if (sortKey === 'family') return Number(b.bill || 0) - Number(a.bill || 0);
       return 0;
     });
     return arr;
   }, [rows, sortKey, sortDir]);
+  const familyGrouped = sortKey === 'family';
+  const familyTotals = useMemo(() => {
+    if (!familyGrouped) return null;
+    const m = new Map<string, { count: number; total: number }>();
+    for (const r of sorted) {
+      const k = r.family || '(no family)';
+      const cur = m.get(k) || { count: 0, total: 0 };
+      cur.count += 1;
+      cur.total += Number(r.bill || 0);
+      m.set(k, cur);
+    }
+    return m;
+  }, [familyGrouped, sorted]);
 
   return (
     <div style={{
@@ -229,7 +248,7 @@ function ExecAccordionRow({
                 <tr style={{ background: 'rgba(15,40,85,0.04)', borderBottom: '1px solid rgba(15,40,85,0.06)' }}>
                   <SortableTh field="tier"   active={sortKey === 'tier'}   dir={sortDir} onSort={onSort}>Tier</SortableTh>
                   <SortableTh field="party"  active={sortKey === 'party'}  dir={sortDir} onSort={onSort}>Party</SortableTh>
-                  <Th>Family</Th>
+                  <SortableTh field="family" active={sortKey === 'family'} dir={sortDir} onSort={onSort}>Family</SortableTh>
                   <SortableTh field="bill"   active={sortKey === 'bill'}   dir={sortDir} onSort={onSort} align="right">Outstanding</SortableTh>
                   <SortableTh field="onHold" active={sortKey === 'onHold'} dir={sortDir} onSort={onSort}>Hold</SortableTh>
                   <Th>Stage</Th>
@@ -237,22 +256,53 @@ function ExecAccordionRow({
                 </tr>
               </thead>
               <tbody>
-                {sorted.map(r => (
-                  <tr key={r.id}
-                    onClick={() => onOpenAccount(r.id)}
-                    style={{ cursor: 'pointer', borderBottom: '1px solid rgba(15,40,85,0.04)' }}
-                    onMouseEnter={ev => (ev.currentTarget.style.background = 'rgba(15,40,85,0.04)')}
-                    onMouseLeave={ev => (ev.currentTarget.style.background = 'transparent')}
-                  >
-                    <Td><TierBadge tier={r.tier} /></Td>
-                    <Td><strong style={{ color: 'var(--navy-deep)' }}>{r.party}</strong></Td>
-                    <Td>{r.family || '—'}</Td>
-                    <Td align="right" mono>{fmtINR(Number(r.bill))}</Td>
-                    <Td><HoldPill status={r.onHold} /></Td>
-                    <Td>{r.stage || '—'}</Td>
-                    <Td>{r.alert || '—'}</Td>
-                  </tr>
-                ))}
+                {(() => {
+                  let lastFam: string | null | undefined;
+                  const out: React.ReactNode[] = [];
+                  sorted.forEach(r => {
+                    if (familyGrouped) {
+                      const fam = r.family || '(no family)';
+                      if (fam !== lastFam) {
+                        const t = familyTotals?.get(fam);
+                        out.push(
+                          <tr key={`fam-${fam}`} style={{ background: 'rgba(15,40,85,0.06)' }}>
+                            <td colSpan={7} style={{ padding: '8px 14px' }}>
+                              <div style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
+                                <span style={{
+                                  fontSize: 11, letterSpacing: '.22em', textTransform: 'uppercase',
+                                  fontWeight: 700, color: 'var(--ink, #0F2855)',
+                                }}>{fam}</span>
+                                {t && (
+                                  <span style={{ fontSize: 11.5, color: 'var(--ink-soft)' }}>
+                                    {t.count} account{t.count === 1 ? '' : 's'} · {fmtINR(t.total)}
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                        lastFam = fam;
+                      }
+                    }
+                    out.push(
+                      <tr key={r.id}
+                        onClick={() => onOpenAccount(r.id)}
+                        style={{ cursor: 'pointer', borderBottom: '1px solid rgba(15,40,85,0.04)' }}
+                        onMouseEnter={ev => (ev.currentTarget.style.background = 'rgba(15,40,85,0.04)')}
+                        onMouseLeave={ev => (ev.currentTarget.style.background = 'transparent')}
+                      >
+                        <Td><TierBadge tier={r.tier} /></Td>
+                        <Td><strong style={{ color: 'var(--navy-deep)' }}>{r.party}</strong></Td>
+                        <Td>{r.family || '—'}</Td>
+                        <Td align="right" mono>{fmtINR(Number(r.bill))}</Td>
+                        <Td><HoldPill status={r.onHold} /></Td>
+                        <Td>{r.stage || '—'}</Td>
+                        <Td>{r.alert || '—'}</Td>
+                      </tr>
+                    );
+                  });
+                  return out;
+                })()}
               </tbody>
             </table>
           )}

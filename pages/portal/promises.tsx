@@ -12,7 +12,10 @@ import { useEffect, useMemo, useState } from 'react';
 import { AppShell } from '../../components/AppShell';
 import { AccountDrawer } from '../../components/AccountDrawer';
 import { TierBadge } from '../../components/TierBadge';
+import { SortableTh, useSort } from '../../components/SortableTh';
 import { fmtINR, fmtDate } from '../../lib/fmt';
+
+type SortKey = 'tier' | 'party' | 'family' | 'expected' | 'totalAmount' | 'exec';
 
 type PromiseRow = {
   id: string;
@@ -52,6 +55,15 @@ export default function PromiseLedgerPage() {
   const [rows, setRows] = useState<PromiseRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
+
+  const sortCtl = useSort<AccountGroup, SortKey>('totalAmount', 'desc', {
+    tier:        g => g.tier || '',
+    party:       g => g.party.toLowerCase(),
+    family:      g => (g.family || '').toLowerCase(),
+    expected:    g => g.latestExpectedBy ? +new Date(g.latestExpectedBy) : 0,
+    totalAmount: g => g.totalAmount,
+    exec:        g => (g.exec || '').toLowerCase(),
+  });
 
   useEffect(() => {
     setRows(null); setError(null);
@@ -129,17 +141,17 @@ export default function PromiseLedgerPage() {
           <table style={tableStyle}>
             <thead>
               <tr style={theadStyle}>
-                <Th>Tier</Th>
-                <Th>Party</Th>
-                <Th>Family</Th>
-                <Th>Latest expected</Th>
-                <Th align="right">Total amount</Th>
+                <SortableTh field="tier"        active={sortCtl.key === 'tier'}        dir={sortCtl.dir} onSort={sortCtl.toggle}>Tier</SortableTh>
+                <SortableTh field="party"       active={sortCtl.key === 'party'}       dir={sortCtl.dir} onSort={sortCtl.toggle}>Party</SortableTh>
+                <SortableTh field="family"      active={sortCtl.key === 'family'}      dir={sortCtl.dir} onSort={sortCtl.toggle}>Family</SortableTh>
+                <SortableTh field="expected"    active={sortCtl.key === 'expected'}    dir={sortCtl.dir} onSort={sortCtl.toggle}>Latest expected</SortableTh>
+                <SortableTh field="totalAmount" active={sortCtl.key === 'totalAmount'} dir={sortCtl.dir} onSort={sortCtl.toggle} align="right">Total amount</SortableTh>
                 <Th>Promises</Th>
-                <Th>Exec</Th>
+                <SortableTh field="exec"        active={sortCtl.key === 'exec'}        dir={sortCtl.dir} onSort={sortCtl.toggle}>Exec</SortableTh>
               </tr>
             </thead>
             <tbody>
-              {groups.map(g => (
+              {sortCtl.sort(groups).map(g => (
                 <tr key={g.party}
                     onClick={() => g.accountId && setOpenId(g.accountId)}
                     style={trStyle}

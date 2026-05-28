@@ -15,7 +15,10 @@ import { AppShell } from '../../components/AppShell';
 import { TierBadge } from '../../components/TierBadge';
 import { AccountDrawer } from '../../components/AccountDrawer';
 import { useConfirm } from '../../components/ConfirmProvider';
+import { SortableTh, useSort } from '../../components/SortableTh';
 import { fmtINR } from '../../lib/fmt';
+
+type SortKey = 'tier' | 'party' | 'family' | 'exec' | 'cm' | 'bill';
 
 type Account = {
   id: string; party: string; family: string | null;
@@ -52,6 +55,15 @@ function Inner() {
   const [assigning, setAssigning] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const confirm = useConfirm();
+
+  const sortCtl = useSort<Account, SortKey>('bill', 'desc', {
+    tier:   r => r.tier,
+    party:  r => r.party.toLowerCase(),
+    family: r => (r.family || '').toLowerCase(),
+    exec:   r => (r.exec   || '').toLowerCase(),
+    cm:     r => (r.cm     || '').toLowerCase(),
+    bill:   r => r.bill,
+  });
 
   async function load() {
     setLoading(true); setError(null);
@@ -96,8 +108,9 @@ function Inner() {
       if (tierFilter   && a.tier   !== tierFilter)   return false;
       if (q && !a.party.toLowerCase().includes(q) && !(a.family || '').toLowerCase().includes(q)) return false;
       return true;
-    }).sort((a, b) => b.bill - a.bill);
+    });
   }, [accounts, search, familyFilter, execFilter, tierFilter, noCMOnly]);
+  const sorted = useMemo(() => sortCtl.sort(filtered), [filtered, sortCtl.key, sortCtl.dir]);
 
   // CM load (count + outstanding by CM)
   const cmLoad = useMemo(() => {
@@ -113,10 +126,10 @@ function Inner() {
   }, [accounts]);
 
   function toggleAll() {
-    if (selected.size === filtered.length && filtered.length > 0) {
+    if (selected.size === sorted.length && sorted.length > 0) {
       setSelected(new Set());
     } else {
-      setSelected(new Set(filtered.map(a => a.id)));
+      setSelected(new Set(sorted.map(a => a.id)));
     }
   }
   function toggleRow(id: string) {
@@ -253,20 +266,20 @@ function Inner() {
                 <Th width="36">
                   <input
                     type="checkbox"
-                    checked={filtered.length > 0 && selected.size === filtered.length}
+                    checked={sorted.length > 0 && selected.size === sorted.length}
                     onChange={toggleAll}
                   />
                 </Th>
-                <Th>Tier</Th>
-                <Th>Party</Th>
-                <Th>Family</Th>
-                <Th>Exec</Th>
-                <Th>Current CM</Th>
-                <Th align="right">Outstanding</Th>
+                <SortableTh field="tier"   active={sortCtl.key === 'tier'}   dir={sortCtl.dir} onSort={sortCtl.toggle}>Tier</SortableTh>
+                <SortableTh field="party"  active={sortCtl.key === 'party'}  dir={sortCtl.dir} onSort={sortCtl.toggle}>Party</SortableTh>
+                <SortableTh field="family" active={sortCtl.key === 'family'} dir={sortCtl.dir} onSort={sortCtl.toggle}>Family</SortableTh>
+                <SortableTh field="exec"   active={sortCtl.key === 'exec'}   dir={sortCtl.dir} onSort={sortCtl.toggle}>Exec</SortableTh>
+                <SortableTh field="cm"     active={sortCtl.key === 'cm'}     dir={sortCtl.dir} onSort={sortCtl.toggle}>Current CM</SortableTh>
+                <SortableTh field="bill"   active={sortCtl.key === 'bill'}   dir={sortCtl.dir} onSort={sortCtl.toggle} align="right">Outstanding</SortableTh>
               </tr>
             </thead>
             <tbody>
-              {filtered.map(a => (
+              {sorted.map(a => (
                 <tr key={a.id} style={{ borderBottom: '1px solid rgba(15,40,85,0.06)' }}>
                   <Td><input type="checkbox" checked={selected.has(a.id)} onChange={() => toggleRow(a.id)} /></Td>
                   <Td><TierBadge tier={a.tier} /></Td>
@@ -283,7 +296,7 @@ function Inner() {
                   <Td align="right" mono>{fmtINR(a.bill)}</Td>
                 </tr>
               ))}
-              {filtered.length === 0 && (
+              {sorted.length === 0 && (
                 <tr><td colSpan={7} style={{ padding: 24, textAlign: 'center', color: 'var(--ink-soft)', fontStyle: 'italic' }}>
                   No accounts match your filters.
                 </td></tr>

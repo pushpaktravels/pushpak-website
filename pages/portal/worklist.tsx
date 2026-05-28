@@ -48,7 +48,7 @@ export default function WorklistPage() {
   );
 }
 
-type SortKey = 'bill' | 'd90p' | 'party' | 'nextFu' | 'tier';
+type SortKey = 'family' | 'bill' | 'd90p' | 'party' | 'nextFu' | 'tier';
 type SortDir = 'asc' | 'desc';
 
 function Inner() {
@@ -57,8 +57,10 @@ function Inner() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
-  const [sortKey, setSortKey] = useState<SortKey>('bill');
-  const [sortDir, setSortDir] = useState<SortDir>('desc');
+  // Default sort = by family (alphabetical) so accounts in the
+  // same family group together. Click any other column to switch.
+  const [sortKey, setSortKey] = useState<SortKey>('family');
+  const [sortDir, setSortDir] = useState<SortDir>('asc');
 
   // Load every row in the user's scope once (≤500 for any reasonable team).
   // Filtering happens client-side so changing the view is instant.
@@ -84,6 +86,8 @@ function Inner() {
     arr.sort((a, b) => {
       let av: any; let bv: any;
       switch (sortKey) {
+        case 'family':  av = (a.family || 'zzz').toLowerCase();
+                        bv = (b.family || 'zzz').toLowerCase(); break;
         case 'bill':    av = a.bill;   bv = b.bill;   break;
         case 'd90p':    av = a.d90p;   bv = b.d90p;   break;
         case 'party':   av = a.party.toLowerCase(); bv = b.party.toLowerCase(); break;
@@ -93,6 +97,9 @@ function Inner() {
       }
       if (av < bv) return sortDir === 'asc' ? -1 : 1;
       if (av > bv) return sortDir === 'asc' ?  1 : -1;
+      // Family ties → secondary sort by outstanding DESC so the
+      // biggest account in a family floats to the top of its group
+      if (sortKey === 'family') return b.bill - a.bill;
       return 0;
     });
     return arr;
@@ -101,8 +108,25 @@ function Inner() {
 
   function toggleSort(key: SortKey) {
     if (key === sortKey) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
-    else { setSortKey(key); setSortDir(key === 'party' || key === 'tier' || key === 'nextFu' ? 'asc' : 'desc'); }
+    else { setSortKey(key); setSortDir(key === 'party' || key === 'tier' || key === 'nextFu' || key === 'family' ? 'asc' : 'desc'); }
   }
+
+  // When sorting by family, build a list of {family, total, count}
+  // pre-totals so we can render a sticky sub-header before each group.
+  const familyGrouped = sortKey === 'family';
+  const familyTotals = useMemo(() => {
+    if (!familyGrouped) return null;
+    const m = new Map<string, { count: number; total: number; d90p: number }>();
+    for (const r of filtered) {
+      const k = r.family || '(no family)';
+      const cur = m.get(k) || { count: 0, total: 0, d90p: 0 };
+      cur.count += 1;
+      cur.total += r.bill;
+      cur.d90p += r.d90p;
+      m.set(k, cur);
+    }
+    return m;
+  }, [familyGrouped, filtered]);
 
   return (
     <div style={{ maxWidth: 1180, margin: '0 auto', padding: '4px 4px 60px' }}>
@@ -161,7 +185,7 @@ function Inner() {
               <tr style={{ background: 'rgba(15,40,85,0.04)', borderBottom: '1px solid rgba(15,40,85,0.10)' }}>
                 <SortableTh field="tier"   active={sortKey === 'tier'}   dir={sortDir} onSort={toggleSort}>Tier</SortableTh>
                 <SortableTh field="party"  active={sortKey === 'party'}  dir={sortDir} onSort={toggleSort}>Party</SortableTh>
-                <Th>Family</Th>
+                <SortableTh field="family" active={sortKey === 'family'} dir={sortDir} onSort={toggleSort}>Family</SortableTh>
                 <SortableTh field="bill"   active={sortKey === 'bill'}   dir={sortDir} onSort={toggleSort} align="right">Outstanding</SortableTh>
                 <SortableTh field="d90p"   active={sortKey === 'd90p'}   dir={sortDir} onSort={toggleSort} align="right">90+ stuck</SortableTh>
                 <Th>Hold</Th>
@@ -169,25 +193,60 @@ function Inner() {
               </tr>
             </thead>
             <tbody>
-              {filtered.map(r => (
-                <tr
-                  key={r.id}
-                  onClick={() => setOpenId(r.id)}
-                  style={{ cursor: 'pointer', borderBottom: '1px solid rgba(15,40,85,0.06)' }}
-                  onMouseEnter={e => (e.currentTarget.style.background = 'rgba(15,40,85,0.04)')}
-                  onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-                >
-                  <Td><TierBadge tier={r.tier} /></Td>
-                  <Td><strong style={{ color: 'var(--ink)' }}>{r.party}</strong></Td>
-                  <Td>{r.family || '—'}</Td>
-                  <Td align="right" mono color={r.bill < 0 ? 'var(--sage)' : undefined}>{fmtINR(r.bill)}</Td>
-                  <Td align="right" mono color={r.d90p > 0 ? 'var(--rust)' : 'var(--ink-soft)'}>
-                    {r.d90p > 0 ? fmtINR(r.d90p) : '—'}
-                  </Td>
-                  <Td><HoldPill status={r.onHold} /></Td>
-                  <Td>{r.nextFu ? new Date(r.nextFu).toLocaleDateString('en-IN') : '—'}</Td>
-                </tr>
-              ))}
+              {(() => {
+                // When sorted by family, insert a tinted sub-header row before
+                // each new family group. Adds a nice grouping cue without
+                // changing the table structure.
+                let lastFam: string | null | undefined;
+                const out: React.ReactNode[] = [];
+                filtered.forEach(r => {
+                  if (familyGrouped) {
+                    const fam = r.family || '(no family)';
+                    if (fam !== lastFam) {
+                      const t = familyTotals?.get(fam);
+                      out.push(
+                        <tr key={`fam-${fam}`} style={{ background: 'rgba(15,40,85,0.06)' }}>
+                          <td colSpan={7} style={{ padding: '8px 14px' }}>
+                            <div style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
+                              <span style={{
+                                fontSize: 11, letterSpacing: '.22em', textTransform: 'uppercase',
+                                fontWeight: 700, color: 'var(--ink, #0F2855)',
+                              }}>{fam}</span>
+                              {t && (
+                                <span style={{ fontSize: 11.5, color: 'var(--ink-soft)' }}>
+                                  {t.count} account{t.count === 1 ? '' : 's'} · {fmtINR(t.total)}
+                                  {t.d90p > 0 && <> · <span style={{ color: 'var(--rust, #B5483D)', fontWeight: 600 }}>{fmtINR(t.d90p)} stuck 90+</span></>}
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                      lastFam = fam;
+                    }
+                  }
+                  out.push(
+                    <tr
+                      key={r.id}
+                      onClick={() => setOpenId(r.id)}
+                      style={{ cursor: 'pointer', borderBottom: '1px solid rgba(15,40,85,0.06)' }}
+                      onMouseEnter={e => (e.currentTarget.style.background = 'rgba(15,40,85,0.04)')}
+                      onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                    >
+                      <Td><TierBadge tier={r.tier} /></Td>
+                      <Td><strong style={{ color: 'var(--ink)' }}>{r.party}</strong></Td>
+                      <Td>{r.family || '—'}</Td>
+                      <Td align="right" mono color={r.bill < 0 ? 'var(--sage)' : undefined}>{fmtINR(r.bill)}</Td>
+                      <Td align="right" mono color={r.d90p > 0 ? 'var(--rust)' : 'var(--ink-soft)'}>
+                        {r.d90p > 0 ? fmtINR(r.d90p) : '—'}
+                      </Td>
+                      <Td><HoldPill status={r.onHold} /></Td>
+                      <Td>{r.nextFu ? new Date(r.nextFu).toLocaleDateString('en-IN') : '—'}</Td>
+                    </tr>
+                  );
+                });
+                return out;
+              })()}
             </tbody>
           </table>
         </div>

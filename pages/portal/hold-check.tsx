@@ -12,7 +12,11 @@ import { AppShell } from '../../components/AppShell';
 import { AccountDrawer } from '../../components/AccountDrawer';
 import { TierBadge } from '../../components/TierBadge';
 import { useConfirm } from '../../components/ConfirmProvider';
+import { SortableTh, useSort } from '../../components/SortableTh';
 import { fmtINR } from '../../lib/fmt';
+
+type SearchSortKey = 'tier' | 'party' | 'family' | 'bill' | 'onHold' | 'alert' | 'exec';
+type BoardSortKey  = 'party' | 'family' | 'reason' | 'bill' | 'd90p' | 'exec' | 'addedOn';
 
 type Row = {
   id: string;
@@ -59,6 +63,35 @@ export default function HoldCheckPage() {
   const [holdsError, setHoldsError] = useState<string | null>(null);
   const [actingId, setActingId] = useState<string | null>(null);
   const confirm = useConfirm();
+
+  // Sort state — one per table (search results + the two boards)
+  const searchSort = useSort<Row, SearchSortKey>('bill', 'desc', {
+    tier:   r => r.tier,
+    party:  r => r.party.toLowerCase(),
+    family: r => (r.family || '').toLowerCase(),
+    bill:   r => Number(r.bill),
+    onHold: r => r.onHold || '',
+    alert:  r => r.alert  || '',
+    exec:   r => (r.exec  || '').toLowerCase(),
+  });
+  const candidateSort = useSort<HoldRow, BoardSortKey>('bill', 'desc', {
+    party:   r => r.party.toLowerCase(),
+    family:  r => (r.family || '').toLowerCase(),
+    reason:  r => (r.reason || '').toLowerCase(),
+    bill:    r => Number(r.bill),
+    d90p:    r => Number(r.d90p),
+    exec:    r => (r.exec || '').toLowerCase(),
+    addedOn: r => +new Date(r.addedOn),
+  });
+  const activeSort = useSort<HoldRow, BoardSortKey>('bill', 'desc', {
+    party:   r => r.party.toLowerCase(),
+    family:  r => (r.family || '').toLowerCase(),
+    reason:  r => (r.reason || '').toLowerCase(),
+    bill:    r => Number(r.bill),
+    d90p:    r => Number(r.d90p),
+    exec:    r => (r.exec || '').toLowerCase(),
+    addedOn: r => +new Date(r.addedOn),
+  });
 
   async function loadHolds() {
     setHoldsLoading(true); setHoldsError(null);
@@ -162,10 +195,11 @@ export default function HoldCheckPage() {
         title="Hold candidates"
         subtitle="Flagged by execs — pending owner / CM approval"
         accent="amber"
-        rows={candidates}
+        rows={candidateSort.sort(candidates)}
         loading={holdsLoading}
         actingId={actingId}
         onOpen={setOpenId}
+        sortKey={candidateSort.key} sortDir={candidateSort.dir} onSort={candidateSort.toggle}
         actions={(r) => (
           <>
             <BoardBtn variant="approve" onClick={() => changeHold(r.id, 'Active')}>Approve</BoardBtn>
@@ -177,10 +211,11 @@ export default function HoldCheckPage() {
         title="On hold"
         subtitle="Bookings currently blocked — release once payment received"
         accent="rust"
-        rows={active}
+        rows={activeSort.sort(active)}
         loading={holdsLoading}
         actingId={actingId}
         onOpen={setOpenId}
+        sortKey={activeSort.key} sortDir={activeSort.dir} onSort={activeSort.toggle}
         actions={(r) => (
           <BoardBtn variant="release" onClick={() => changeHold(r.id, 'Released')}>Release</BoardBtn>
         )}
@@ -208,17 +243,17 @@ export default function HoldCheckPage() {
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
             <thead>
               <tr style={{ background: 'var(--bg-2, #f6f8fb)', borderBottom: '1px solid var(--line, #e7eaf0)' }}>
-                <Th>Tier</Th>
-                <Th>Party</Th>
-                <Th>Family</Th>
-                <Th align="right">Outstanding</Th>
-                <Th>Hold</Th>
-                <Th>Alert</Th>
-                <Th>Exec</Th>
+                <SortableTh field="tier"   active={searchSort.key === 'tier'}   dir={searchSort.dir} onSort={searchSort.toggle}>Tier</SortableTh>
+                <SortableTh field="party"  active={searchSort.key === 'party'}  dir={searchSort.dir} onSort={searchSort.toggle}>Party</SortableTh>
+                <SortableTh field="family" active={searchSort.key === 'family'} dir={searchSort.dir} onSort={searchSort.toggle}>Family</SortableTh>
+                <SortableTh field="bill"   active={searchSort.key === 'bill'}   dir={searchSort.dir} onSort={searchSort.toggle} align="right">Outstanding</SortableTh>
+                <SortableTh field="onHold" active={searchSort.key === 'onHold'} dir={searchSort.dir} onSort={searchSort.toggle}>Hold</SortableTh>
+                <SortableTh field="alert"  active={searchSort.key === 'alert'}  dir={searchSort.dir} onSort={searchSort.toggle}>Alert</SortableTh>
+                <SortableTh field="exec"   active={searchSort.key === 'exec'}   dir={searchSort.dir} onSort={searchSort.toggle}>Exec</SortableTh>
               </tr>
             </thead>
             <tbody>
-              {rows.map(r => (
+              {searchSort.sort(rows).map(r => (
                 <tr
                   key={r.id}
                   onClick={() => setOpenId(r.id)}
@@ -270,6 +305,7 @@ function Td({ children, align, mono }: { children: React.ReactNode; align?: 'lef
 // ─── Hold boards ──────────────────────────────────────────────
 function HoldBoard({
   title, subtitle, accent, rows, loading, actingId, onOpen, actions,
+  sortKey, sortDir, onSort,
 }: {
   title: string;
   subtitle: string;
@@ -279,6 +315,9 @@ function HoldBoard({
   actingId: string | null;
   onOpen: (id: string) => void;
   actions: (r: HoldRow) => React.ReactNode;
+  sortKey: BoardSortKey;
+  sortDir: 'asc' | 'desc';
+  onSort: (k: BoardSortKey) => void;
 }) {
   const borderColor = accent === 'rust' ? 'rgba(178,79,55,.35)' : 'rgba(217,165,69,.35)';
   const badgeBg     = accent === 'rust' ? 'rgba(178,79,55,.16)' : 'rgba(217,165,69,.18)';
@@ -317,11 +356,11 @@ function HoldBoard({
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
           <thead>
             <tr style={{ borderBottom: '1px solid rgba(15,40,85,0.06)' }}>
-              <Th>Party</Th>
-              <Th>Reason</Th>
-              <Th align="right">Outstanding</Th>
-              <Th align="right">90+ stuck</Th>
-              <Th>Exec</Th>
+              <SortableTh field="party"  active={sortKey === 'party'}  dir={sortDir} onSort={onSort}>Party</SortableTh>
+              <SortableTh field="reason" active={sortKey === 'reason'} dir={sortDir} onSort={onSort}>Reason</SortableTh>
+              <SortableTh field="bill"   active={sortKey === 'bill'}   dir={sortDir} onSort={onSort} align="right">Outstanding</SortableTh>
+              <SortableTh field="d90p"   active={sortKey === 'd90p'}   dir={sortDir} onSort={onSort} align="right">90+ stuck</SortableTh>
+              <SortableTh field="exec"   active={sortKey === 'exec'}   dir={sortDir} onSort={onSort}>Exec</SortableTh>
               <Th align="right">Actions</Th>
             </tr>
           </thead>

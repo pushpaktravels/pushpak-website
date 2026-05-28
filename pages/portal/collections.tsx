@@ -8,7 +8,10 @@ import { useEffect, useState } from 'react';
 import { AppShell } from '../../components/AppShell';
 import { AccountDrawer } from '../../components/AccountDrawer';
 import { TierBadge } from '../../components/TierBadge';
+import { SortableTh, useSort } from '../../components/SortableTh';
 import { fmtINR, fmtDate } from '../../lib/fmt';
+
+type SortKey = 'date' | 'tier' | 'party' | 'family' | 'amount' | 'newOut' | 'exec' | 'trigger';
 
 type Row = {
   id: string; date: string; party: string; family: string | null;
@@ -32,6 +35,17 @@ export default function CollectionListPage() {
   const [total, setTotal] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
+
+  const sortCtl = useSort<Row, SortKey>('date', 'desc', {
+    date:    r => +new Date(r.date),
+    tier:    r => r.tier || '',
+    party:   r => r.party.toLowerCase(),
+    family:  r => (r.family || '').toLowerCase(),
+    amount:  r => Number(r.amount),
+    newOut:  r => Number(r.newOutstanding),
+    exec:    r => (r.exec || '').toLowerCase(),
+    trigger: r => (r.trigger || '').toLowerCase(),
+  });
 
   useEffect(() => {
     setRows(null); setError(null);
@@ -75,18 +89,18 @@ export default function CollectionListPage() {
           <table style={tableStyle}>
             <thead>
               <tr style={theadStyle}>
-                <Th>Date</Th>
-                <Th>Tier</Th>
-                <Th>Party</Th>
-                <Th>Family</Th>
-                <Th align="right">Amount</Th>
-                <Th align="right">Prev → New</Th>
-                <Th>Exec</Th>
-                <Th>Trigger</Th>
+                <SortableTh field="date"    active={sortCtl.key === 'date'}    dir={sortCtl.dir} onSort={sortCtl.toggle}>Date</SortableTh>
+                <SortableTh field="tier"    active={sortCtl.key === 'tier'}    dir={sortCtl.dir} onSort={sortCtl.toggle}>Tier</SortableTh>
+                <SortableTh field="party"   active={sortCtl.key === 'party'}   dir={sortCtl.dir} onSort={sortCtl.toggle}>Party</SortableTh>
+                <SortableTh field="family"  active={sortCtl.key === 'family'}  dir={sortCtl.dir} onSort={sortCtl.toggle}>Family</SortableTh>
+                <SortableTh field="amount"  active={sortCtl.key === 'amount'}  dir={sortCtl.dir} onSort={sortCtl.toggle} align="right">Amount</SortableTh>
+                <SortableTh field="newOut"  active={sortCtl.key === 'newOut'}  dir={sortCtl.dir} onSort={sortCtl.toggle} align="right">Prev → New</SortableTh>
+                <SortableTh field="exec"    active={sortCtl.key === 'exec'}    dir={sortCtl.dir} onSort={sortCtl.toggle}>Exec</SortableTh>
+                <SortableTh field="trigger" active={sortCtl.key === 'trigger'} dir={sortCtl.dir} onSort={sortCtl.toggle}>Trigger</SortableTh>
               </tr>
             </thead>
             <tbody>
-              {rows.map(r => (
+              {sortCtl.sort(rows).map(r => (
                 <tr key={r.id} onClick={() => r.account_id && setOpenId(r.account_id)}
                     style={trStyle}
                     onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-2, #f6f8fb)')}

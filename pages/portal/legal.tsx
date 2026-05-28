@@ -8,7 +8,10 @@ import { useEffect, useState } from 'react';
 import { AppShell } from '../../components/AppShell';
 import { AccountDrawer } from '../../components/AccountDrawer';
 import { TierBadge } from '../../components/TierBadge';
+import { SortableTh, useSort } from '../../components/SortableTh';
 import { fmtINR, fmtDate } from '../../lib/fmt';
+
+type SortKey = 'tier' | 'party' | 'family' | 'filed' | 'outstanding' | 'status' | 'lawyer' | 'hearing';
 
 type Row = {
   id: string; party: string; family: string | null;
@@ -36,6 +39,17 @@ export default function LegalLedgerPage() {
   const [rows, setRows] = useState<Row[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
+
+  const sortCtl = useSort<Row, SortKey>('outstanding', 'desc', {
+    tier:        r => r.tier || '',
+    party:       r => r.party.toLowerCase(),
+    family:      r => (r.family || '').toLowerCase(),
+    filed:       r => +new Date(r.filedOn),
+    outstanding: r => Number(r.outstanding),
+    status:      r => r.status,
+    lawyer:      r => (r.lawyer || '').toLowerCase(),
+    hearing:     r => r.nextHearing ? +new Date(r.nextHearing) : 0,
+  });
 
   useEffect(() => {
     setRows(null); setError(null);
@@ -69,18 +83,18 @@ export default function LegalLedgerPage() {
           <table style={tableStyle}>
             <thead>
               <tr style={theadStyle}>
-                <Th>Tier</Th>
-                <Th>Party</Th>
-                <Th>Family</Th>
-                <Th>Filed</Th>
-                <Th align="right">Outstanding</Th>
-                <Th>Status</Th>
-                <Th>Lawyer</Th>
-                <Th>Next hearing</Th>
+                <SortableTh field="tier"        active={sortCtl.key === 'tier'}        dir={sortCtl.dir} onSort={sortCtl.toggle}>Tier</SortableTh>
+                <SortableTh field="party"       active={sortCtl.key === 'party'}       dir={sortCtl.dir} onSort={sortCtl.toggle}>Party</SortableTh>
+                <SortableTh field="family"      active={sortCtl.key === 'family'}      dir={sortCtl.dir} onSort={sortCtl.toggle}>Family</SortableTh>
+                <SortableTh field="filed"       active={sortCtl.key === 'filed'}       dir={sortCtl.dir} onSort={sortCtl.toggle}>Filed</SortableTh>
+                <SortableTh field="outstanding" active={sortCtl.key === 'outstanding'} dir={sortCtl.dir} onSort={sortCtl.toggle} align="right">Outstanding</SortableTh>
+                <SortableTh field="status"      active={sortCtl.key === 'status'}      dir={sortCtl.dir} onSort={sortCtl.toggle}>Status</SortableTh>
+                <SortableTh field="lawyer"      active={sortCtl.key === 'lawyer'}      dir={sortCtl.dir} onSort={sortCtl.toggle}>Lawyer</SortableTh>
+                <SortableTh field="hearing"     active={sortCtl.key === 'hearing'}     dir={sortCtl.dir} onSort={sortCtl.toggle}>Next hearing</SortableTh>
               </tr>
             </thead>
             <tbody>
-              {rows.map(r => (
+              {sortCtl.sort(rows).map(r => (
                 <tr key={r.id} onClick={() => r.account_id && setOpenId(r.account_id)}
                     style={trStyle}
                     onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-2, #f6f8fb)')}
