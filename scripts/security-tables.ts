@@ -7,7 +7,6 @@ const pool = new Pool({ connectionString: process.env.DIRECT_URL || process.env.
 
 const DEFAULTS: Array<[string, string, string]> = [
   ['SESSION_IDLE_MINUTES', '30',  'security'],
-  ['OWNER_IP_ALLOWLIST',   '',    'security'], // comma-separated IPs / CIDRs; empty = no restriction
   ['PII_MASK_ENABLED',     'true','security'],
   ['WA_TPL_GENTLE',
     'Dear {owner}, this is a gentle reminder from Pushpak Travels regarding your outstanding of ₹{outstanding} on account {party}, pending for {days} days. Kindly arrange payment at your earliest convenience. Thank you. — {exec}',

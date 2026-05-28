@@ -19,7 +19,7 @@ type Setting = { key: string; value: string; category: string; updatedAt: string
 
 // ─── Category metadata (display title + description + sort order) ─
 const CATEGORY_META: Record<string, { title: string; description: string; order: number }> = {
-  security:       { title: 'Security',               description: 'Owner IP allowlist, idle timeout, PII masking',                    order: 0 },
+  security:       { title: 'Security',               description: 'Idle timeout, PII masking',                                        order: 0 },
   escalation:     { title: 'Escalation thresholds',  description: 'Calls × max days before bumping to next stage, per Tier × Stage',  order: 1 },
   'auto-hold':    { title: 'Auto booking hold',      description: 'Rules that flag accounts as hold candidates during refresh',       order: 2 },
   worklist:       { title: 'Worklist & alerts',      description: 'Thresholds for "Due Soon" and "Stale"',                              order: 3 },
@@ -48,7 +48,6 @@ function titleCase(key: string): string {
 // key on each row). Falls back to nothing if not listed.
 const KEY_DESCRIPTIONS: Record<string, string> = {
   SESSION_IDLE_MINUTES:  'Auto sign-out after this many minutes of inactivity (currently a fixed 30 min on the client).',
-  OWNER_IP_ALLOWLIST:    'Comma-separated IPs or CIDRs. When set, owner logins are blocked from other IPs. Leave empty to disable.',
   PII_MASK_ENABLED:      'Whether phone numbers / emails are masked in lists. (Currently always masked — reveal is per-field via audit.)',
   WA_TPL_GENTLE:           'Used by Send Reminder → Gentle reminder. Variables: {party} {outstanding} {owner} {days} {exec}',
   WA_TPL_FIRM:             'Used by Send Reminder → Firm reminder. Variables: {party} {outstanding} {owner} {days} {exec}',
@@ -211,7 +210,6 @@ export default function SettingsPage() {
                     // (long, multi-line). Everything else stays a single-
                     // line input. The address/list value can also wrap.
                     const isLong = s.key.startsWith('WA_TPL_')
-                      || s.key === 'OWNER_IP_ALLOWLIST'
                       || (s.value && s.value.length > 80);
                     const desc = KEY_DESCRIPTIONS[s.key];
                     return (
