@@ -74,7 +74,16 @@ const VISHAL_ALLOWED_VIEWS = new Set(['insights', 'collections']);
 const VANSHIKA_HIDDEN_VIEWS = new Set(['worklist']);
 
 function canSee(item: NavItem, user: CurrentUser): boolean {
-  // Explicit per-user override (set in Users & Authorities) wins.
+  // Owner always sees everything. viewPerms is meant for restricting
+  // non-owner roles; the owner is the one who SETS those restrictions
+  // so they should never be restricted themselves. This also keeps the
+  // sidebar working when new views are added to the codebase — owners
+  // get the new entries automatically without needing to re-edit their
+  // own permissions row.
+  if (user.role === 'owner') return true;
+
+  // Explicit per-user override (set in Users & Authorities) wins for
+  // every non-owner role.
   if (user.viewPerms && user.viewPerms.length > 0) {
     return user.viewPerms.includes(item.view);
   }
