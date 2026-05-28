@@ -82,19 +82,19 @@ export default function DashboardPage() {
           </div>
 
           {/* ── AGING + TIER DISTRIBUTION ── */}
-          <div className="dash-row two" style={{ marginTop: 18 }}>
+          <div className="dash-row two" style={{ marginTop: 20 }}>
             <div className="kpi">
               <div className="kpi-label">Aging Buckets</div>
-              <div style={{ marginTop: 14, display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12 }}>
+              <div style={{ marginTop: 22, display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 24 }}>
                 {[
                   { label: '≤ 30 d', value: data.d30 },
                   { label: '≤ 60 d', value: data.d60 },
                   { label: '≤ 90 d', value: data.d90 },
                   { label: '> 90 d', value: data.d90p },
                 ].map(b => (
-                  <div key={b.label} style={{ padding: '12px 0' }}>
-                    <div style={{ fontSize: 9.5, letterSpacing: '.22em', textTransform: 'uppercase', color: 'var(--t-3)', fontWeight: 700, marginBottom: 6 }}>{b.label}</div>
-                    <div style={{ fontFamily: "inherit", fontSize: 14, color: 'var(--navy-deep)', fontWeight: 600 }}>{fmtINR(b.value)}</div>
+                  <div key={b.label} style={{ padding: '6px 0' }}>
+                    <div style={{ fontSize: 9.5, letterSpacing: '.22em', textTransform: 'uppercase', color: 'var(--t-3)', fontWeight: 700, marginBottom: 10 }}>{b.label}</div>
+                    <div style={{ fontFamily: "inherit", fontSize: 16, color: 'var(--navy-deep)', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{fmtINR(b.value)}</div>
                   </div>
                 ))}
               </div>
@@ -102,12 +102,12 @@ export default function DashboardPage() {
 
             <div className="kpi">
               <div className="kpi-label">Tier Distribution</div>
-              <div style={{ marginTop: 14, display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 10 }}>
+              <div style={{ marginTop: 22, display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 14 }}>
                 {(['A','B','C','D','E'] as const).map(t => (
-                  <div key={t} style={{ textAlign: 'center' }}>
-                    <div className={`tier tier-${t}`} style={{ display: 'inline-block', padding: '5px 12px', fontSize: 14, fontWeight: 700 }}>{t}</div>
-                    <div style={{ marginTop: 8, fontSize: 18, fontWeight: 600, color: 'var(--navy-deep)' }}>{data.counts[t] || 0}</div>
-                    <div style={{ fontSize: 10, letterSpacing: '.16em', textTransform: 'uppercase', color: 'var(--t-3)', fontWeight: 600, marginTop: 2 }}>
+                  <div key={t} style={{ textAlign: 'center', padding: '4px 0' }}>
+                    <div className={`tier tier-${t}`} style={{ display: 'inline-block', padding: '6px 14px', fontSize: 14, fontWeight: 700 }}>{t}</div>
+                    <div style={{ marginTop: 14, fontSize: 20, fontWeight: 600, color: 'var(--navy-deep)', fontVariantNumeric: 'tabular-nums' }}>{data.counts[t] || 0}</div>
+                    <div style={{ fontSize: 10, letterSpacing: '.16em', textTransform: 'uppercase', color: 'var(--t-3)', fontWeight: 600, marginTop: 6 }}>
                       {{ A: 'Recents', B: 'Due', C: 'Overdue', D: 'Doubtful', E: 'Legal' }[t]}
                     </div>
                   </div>
@@ -118,10 +118,10 @@ export default function DashboardPage() {
 
           {/* ── CUSTOMER CREDITS (advances / refunds) ── */}
           {data.credits && data.credits.length > 0 && (
-            <div className="kpi" style={{ marginTop: 18, padding: 0, overflow: 'hidden' }}>
+            <div className="kpi" style={{ marginTop: 20, padding: 0, overflow: 'hidden' }}>
               <div style={{
-                padding: '14px 18px', borderBottom: '1px solid var(--line, #e7eaf0)',
-                display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap',
+                padding: '18px 22px', borderBottom: '1px solid var(--line, #e7eaf0)',
+                display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap',
               }}>
                 <div className="kpi-label" style={{ margin: 0 }}>Customer Credits</div>
                 <div style={{ fontSize: 12.5, color: 'var(--ink-soft)' }}>
@@ -182,11 +182,11 @@ export default function DashboardPage() {
 }
 
 const thStyle: React.CSSProperties = {
-  textAlign: 'left', padding: '10px 14px', fontSize: 10,
+  textAlign: 'left', padding: '12px 18px', fontSize: 10,
   letterSpacing: '.16em', textTransform: 'uppercase',
   color: 'var(--ink-soft)', fontWeight: 700,
 };
 const tdStyle: React.CSSProperties = {
-  textAlign: 'left', padding: '11px 14px',
+  textAlign: 'left', padding: '14px 18px',
   color: 'var(--ink)', verticalAlign: 'middle',
 };
