@@ -60,16 +60,13 @@ export function requireRole(
   return true;
 }
 
-// What exec NAMES can this user see? null = see-all (owner/admin/analyst).
-export function visibleExecNames(user: AuthedUser): Set<string> | null {
-  if (user.role === 'owner' || user.role === 'admin' || user.role === 'analyst') return null;
-  // cm → their team; exec → only themselves
-  const set = new Set<string>();
-  if (user.role === 'cm' && user.team.length > 0) {
-    user.team.forEach(n => set.add(n.toUpperCase()));
-  }
-  set.add(user.name.toUpperCase());
-  return set;
+// What exec NAMES can this user see? null = see-all.
+// Per owner's directive: every role (owner / admin / cm / exec / analyst)
+// sees every account. Team collaboration > silos for this org.
+// Audit-log entries still record WHO took an action, so accountability
+// is preserved even though scope is wide-open.
+export function visibleExecNames(_user: AuthedUser): Set<string> | null {
+  return null;
 }
 
 // Get caller IP (Vercel sets x-forwarded-for; we take the first)

@@ -20,18 +20,25 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   try {
     const rows = await query<any>(
       `SELECT
-         COALESCE(family, '(no family)')                          AS family,
-         COUNT(*)::int                                            AS account_count,
-         COALESCE(SUM(bill), 0)::numeric                          AS total_outstanding,
-         SUM(CASE WHEN "onHold" = 'Active'    THEN 1 ELSE 0 END)::int AS active_holds,
-         SUM(CASE WHEN "onHold" = 'Candidate' THEN 1 ELSE 0 END)::int AS candidates,
-         MIN(tier)                                                AS top_tier,
+         COALESCE(a.family, '(no family)')                          AS family,
+         COUNT(*)::int                                              AS account_count,
+         COALESCE(SUM(a.bill), 0)::numeric                          AS total_outstanding,
+         SUM(CASE WHEN a."onHold" = 'Active'    THEN 1 ELSE 0 END)::int AS active_holds,
+         SUM(CASE WHEN a."onHold" = 'Candidate' THEN 1 ELSE 0 END)::int AS candidates,
+         MIN(a.tier)                                                AS top_tier,
          BOOL_OR(EXISTS (
            SELECT 1 FROM "ClientMaster" cm
-           WHERE cm.family = "Account".family AND cm.vip = 'YES'
-         ))                                                       AS has_vip
-       FROM "Account"
-       GROUP BY family
+           WHERE cm.family = a.family AND cm.vip = 'YES'
+         ))                                                         AS has_vip,
+         -- Owing accounts that DON'T already have an open legal case.
+         -- A family with 0 here is fully converted → hide the button.
+         SUM(CASE WHEN a.bill > 0 AND NOT EXISTS (
+           SELECT 1 FROM "LegalCase" lc
+            WHERE lc.party = a.party
+              AND lc.status NOT IN ('Settled','Dropped','Recovered','WrittenOff')
+         ) THEN 1 ELSE 0 END)::int                                  AS owing_unconverted
+       FROM "Account" a
+       GROUP BY a.family
        ORDER BY total_outstanding DESC`,
       []
     );
@@ -47,6 +54,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           candidates: Number(r.candidates),
           topTier: r.top_tier,
           hasVip: !!r.has_vip,
+          owingUnconverted: Number(r.owing_unconverted),
         })),
       },
     });

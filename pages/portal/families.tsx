@@ -9,6 +9,7 @@ import { useEffect, useState } from 'react';
 import { AppShell } from '../../components/AppShell';
 import { AccountDrawer } from '../../components/AccountDrawer';
 import { TierBadge } from '../../components/TierBadge';
+import { useConfirm } from '../../components/ConfirmProvider';
 import { fmtINR } from '../../lib/fmt';
 
 type FamilyRow = {
@@ -19,6 +20,7 @@ type FamilyRow = {
   candidates: number;
   topTier: string | null;
   hasVip: boolean;
+  owingUnconverted: number;
 };
 
 type AccountRow = {
@@ -36,6 +38,11 @@ export default function FamiliesPage() {
   const [openId, setOpenId] = useState<string | null>(null);
   const [convertingFamily, setConvertingFamily] = useState<string | null>(null);
   const [convertResult, setConvertResult] = useState<{ family: string; created: number } | null>(null);
+  // Track families whose accounts have all been converted so the
+  // "Convert to Legal" button can hide. We refresh this set after
+  // every successful conversion.
+  const [doneFamilies, setDoneFamilies] = useState<Set<string>>(new Set());
+  const confirm = useConfirm();
 
   function reload() {
     fetch('/api/families')
@@ -49,7 +56,12 @@ export default function FamiliesPage() {
   useEffect(() => { reload(); }, []);
 
   async function convertFamilyToLegal(family: string) {
-    if (!window.confirm(`Create Filed legal cases for every owing account in "${family}"?\n\nAlready-active legal cases are skipped automatically.`)) return;
+    const ok = await confirm({
+      title: `Convert ${family} to legal cases?`,
+      body: `Create Filed legal cases for every owing account in "${family}". Accounts that already have an open legal case will be skipped automatically.`,
+      confirmLabel: 'Convert',
+    });
+    if (!ok) return;
     setConvertingFamily(family); setError(null);
     try {
       const r = await fetch('/api/legal/bulk-convert', {
@@ -59,9 +71,17 @@ export default function FamiliesPage() {
       }).then(x => x.json());
       if (!r?.ok) throw new Error(r?.error || 'Conversion failed');
       setConvertResult({ family, created: r.created });
+      // Mark the family as done so the button disappears.
+      setDoneFamilies(prev => {
+        const next = new Set(prev);
+        next.add(family);
+        return next;
+      });
+      // Refresh the families list so owingUnconverted updates and
+      // the converted ✓ pill replaces the button.
+      reload();
       // Reload accounts list if this family is currently expanded
       if (expanded === family) {
-        // trigger the existing useEffect by toggling
         setExpanded(null);
         setTimeout(() => setExpanded(family), 50);
       }
@@ -150,7 +170,7 @@ export default function FamiliesPage() {
                     <div style={{ fontFamily: "inherit", fontSize: 16, fontWeight: 600, color: 'var(--navy-deep)' }}>{fmtINR(f.totalOutstanding)}</div>
                     <div style={{ fontSize: 10, color: 'var(--t-3)', letterSpacing: '.18em', textTransform: 'uppercase', fontWeight: 600, marginTop: 2 }}>Outstanding</div>
                   </div>
-                  {isLegalFamily && (
+                  {isLegalFamily && !doneFamilies.has(f.family) && f.owingUnconverted > 0 && (
                     <button
                       onClick={(e) => { e.stopPropagation(); convertFamilyToLegal(f.family); }}
                       disabled={convertingFamily === f.family}
@@ -166,6 +186,16 @@ export default function FamiliesPage() {
                     >
                       {convertingFamily === f.family ? 'Converting…' : 'Convert to Legal'}
                     </button>
+                  )}
+                  {isLegalFamily && (doneFamilies.has(f.family) || f.owingUnconverted === 0) && (
+                    <span style={{
+                      marginLeft: 12, padding: '6px 12px', borderRadius: 6,
+                      background: 'rgba(46,108,84,0.10)',
+                      color: 'var(--sage, #2E6C54)',
+                      fontSize: 10, fontWeight: 700,
+                      letterSpacing: '.18em', textTransform: 'uppercase',
+                      whiteSpace: 'nowrap',
+                    }}>✓ Converted</span>
                   )}
                 </div>
 
@@ -183,12 +213,26 @@ export default function FamiliesPage() {
                         </thead>
                         <tbody>
                           {accounts.map(a => (
-                            <tr key={a.id} onClick={() => setOpenId(a.id)}
-                                style={{ cursor: 'pointer', borderBottom: '1px solid var(--line, #e7eaf0)' }}
+                            <tr key={a.id}
+                                style={{ borderBottom: '1px solid var(--line, #e7eaf0)' }}
                                 onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-2, #f6f8fb)')}
                                 onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
-                              <Td><TierBadge tier={a.tier} /></Td>
-                              <Td><strong style={{ color: 'var(--navy-deep)' }}>{a.party}</strong></Td>
+                              <Td>
+                                <TierSelect
+                                  accountId={a.id}
+                                  current={a.tier}
+                                  onSaved={(newTier) => {
+                                    setAccounts(prev => prev.map(x => x.id === a.id ? { ...x, tier: newTier } : x));
+                                  }}
+                                />
+                              </Td>
+                              <Td>
+                                <button onClick={() => setOpenId(a.id)} style={{
+                                  background: 'transparent', border: 'none', padding: 0, cursor: 'pointer',
+                                  fontWeight: 600, color: 'var(--navy-deep)', textAlign: 'left',
+                                  fontFamily: 'inherit', fontSize: 12,
+                                }}>{a.party}</button>
+                              </Td>
                               <Td align="right" mono>{fmtINR(Number(a.bill))}</Td>
                               <Td>{a.onHold ? <span style={{ color: a.onHold === 'Active' ? 'var(--rust)' : 'var(--amber)', fontSize: 11, fontWeight: 600 }}>{a.onHold}</span> : <span style={{ color: 'var(--sage)', fontSize: 11 }}>Clear</span>}</Td>
                               <Td>{a.alert || '—'}</Td>
@@ -216,3 +260,63 @@ function ErrorBox({ children }: { children: React.ReactNode }) { return <div sty
 function EmptyState({ title, body }: { title: string; body: string }) { return <div className="view-empty" style={{ padding: 40, textAlign: 'center' }}><h3 style={{ fontSize: 18, color: 'var(--navy-deep)', marginBottom: 8 }}>{title}</h3><p style={{ color: 'var(--t-2)' }}>{body}</p></div>; }
 function Th({ children, align }: { children: React.ReactNode; align?: 'left' | 'right' }) { return <th style={{ textAlign: align || 'left', padding: '10px 14px', fontSize: 10, letterSpacing: '.16em', textTransform: 'uppercase', color: 'var(--t-3)', fontWeight: 700 }}>{children}</th>; }
 function Td({ children, align, mono }: { children: React.ReactNode; align?: 'left' | 'right'; mono?: boolean }) { return <td style={{ textAlign: align || 'left', padding: '10px 14px', color: 'var(--t-1)', verticalAlign: 'middle', fontFamily: mono ? "inherit" : undefined }}>{children}</td>; }
+
+// ─── Inline tier-change dropdown ───────────────────────────────
+// Replaces the read-only TierBadge with an editable select. The
+// API treats manual tier changes as overrides automatically.
+function TierSelect({
+  accountId, current, onSaved,
+}: { accountId: string; current: string; onSaved: (t: string) => void }) {
+  const [val, setVal] = useState(current);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function save(next: string) {
+    if (next === val) return;
+    const old = val;
+    setVal(next); setSaving(true); setErr(null);
+    try {
+      const r = await fetch(`/api/accounts/${encodeURIComponent(accountId)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tier: next }),
+      }).then(x => x.json());
+      if (!r?.ok) throw new Error(r?.error || 'Failed');
+      onSaved(next);
+    } catch (e: any) {
+      setVal(old);
+      setErr(e.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const palette: Record<string, { bg: string; fg: string }> = {
+    A: { bg: 'rgba(46,108,84,0.14)',  fg: 'var(--sage, #2E6C54)' },
+    B: { bg: 'rgba(46,108,84,0.10)',  fg: 'var(--sage, #2E6C54)' },
+    C: { bg: 'rgba(217,165,69,0.20)', fg: 'var(--amber, #B58430)' },
+    D: { bg: 'rgba(217,165,69,0.20)', fg: 'var(--amber, #B58430)' },
+    E: { bg: 'rgba(178,79,55,0.16)',  fg: 'var(--rust, #B5483D)' },
+  };
+  const p = palette[val] || palette.A;
+
+  return (
+    <select
+      value={val}
+      disabled={saving}
+      onClick={(e) => e.stopPropagation()}
+      onChange={(e) => save(e.target.value)}
+      title={err || `Change tier (currently ${val})`}
+      style={{
+        background: p.bg, color: p.fg,
+        border: 'none', borderRadius: 6,
+        padding: '4px 8px', fontSize: 11, fontWeight: 700,
+        letterSpacing: '.16em', textTransform: 'uppercase',
+        cursor: saving ? 'wait' : 'pointer', fontFamily: 'inherit',
+        opacity: saving ? 0.6 : 1,
+      }}
+    >
+      {['A','B','C','D','E'].map(t => <option key={t} value={t}>{t}</option>)}
+    </select>
+  );
+}

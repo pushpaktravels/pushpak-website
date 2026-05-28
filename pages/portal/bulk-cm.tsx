@@ -14,6 +14,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { AppShell } from '../../components/AppShell';
 import { TierBadge } from '../../components/TierBadge';
 import { AccountDrawer } from '../../components/AccountDrawer';
+import { useConfirm } from '../../components/ConfirmProvider';
 import { fmtINR } from '../../lib/fmt';
 
 type Account = {
@@ -50,6 +51,7 @@ function Inner() {
   const [targetCM, setTargetCM] = useState<string>('');
   const [assigning, setAssigning] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const confirm = useConfirm();
 
   async function load() {
     setLoading(true); setError(null);
@@ -127,7 +129,12 @@ function Inner() {
 
   async function assign() {
     if (selected.size === 0 || !targetCM || assigning) return;
-    if (!window.confirm(`Assign ${selected.size} account${selected.size === 1 ? '' : 's'} to "${targetCM}"?`)) return;
+    const ok = await confirm({
+      title: `Assign ${selected.size} account${selected.size === 1 ? '' : 's'} to ${targetCM}?`,
+      body: 'This will set the Collection Manager on every selected account and log a history entry on each.',
+      confirmLabel: 'Assign',
+    });
+    if (!ok) return;
     setAssigning(true); setError(null); setToast(null);
     try {
       const r = await fetch('/api/accounts/bulk-assign', {

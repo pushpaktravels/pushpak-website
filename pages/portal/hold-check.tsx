@@ -11,6 +11,7 @@ import { useEffect, useState } from 'react';
 import { AppShell } from '../../components/AppShell';
 import { AccountDrawer } from '../../components/AccountDrawer';
 import { TierBadge } from '../../components/TierBadge';
+import { useConfirm } from '../../components/ConfirmProvider';
 import { fmtINR } from '../../lib/fmt';
 
 type Row = {
@@ -57,6 +58,7 @@ export default function HoldCheckPage() {
   const [holdsLoading, setHoldsLoading] = useState(true);
   const [holdsError, setHoldsError] = useState<string | null>(null);
   const [actingId, setActingId] = useState<string | null>(null);
+  const confirm = useConfirm();
 
   async function loadHolds() {
     setHoldsLoading(true); setHoldsError(null);
@@ -76,7 +78,15 @@ export default function HoldCheckPage() {
   async function changeHold(id: string, status: 'Active' | 'Released') {
     if (actingId) return;
     const verb = status === 'Active' ? 'approve and activate' : 'release';
-    if (!window.confirm(`Are you sure you want to ${verb} this hold?`)) return;
+    const ok = await confirm({
+      title: status === 'Active' ? 'Activate hold?' : 'Release hold?',
+      body: status === 'Active'
+        ? 'Bookings for this party will be blocked once you confirm.'
+        : 'New bookings will be allowed again once you confirm.',
+      confirmLabel: status === 'Active' ? 'Activate' : 'Release',
+      destructive: status === 'Active',
+    });
+    if (!ok) return;
     setActingId(id); setHoldsError(null);
     try {
       const r = await fetch(`/api/holds/${encodeURIComponent(id)}`, {

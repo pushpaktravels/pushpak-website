@@ -12,6 +12,7 @@
 // ============================================================
 import { useEffect, useMemo, useState } from 'react';
 import { AppShell } from '../../components/AppShell';
+import { useConfirm } from '../../components/ConfirmProvider';
 import { fmtRelative } from '../../lib/fmt';
 
 type Role = 'owner' | 'admin' | 'cm' | 'exec' | 'analyst';
@@ -64,6 +65,7 @@ export default function UsersAuthPage() {
   const [users, setUsers] = useState<User[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [editTarget, setEditTarget] = useState<User | 'new' | null>(null);
+  const confirm = useConfirm();
 
   function load() {
     fetch('/api/users')
@@ -77,7 +79,13 @@ export default function UsersAuthPage() {
   useEffect(load, []);
 
   async function deactivate(u: User) {
-    if (!window.confirm(`Deactivate ${u.name}? They won't be able to sign in until reactivated.`)) return;
+    const ok = await confirm({
+      title: `Deactivate ${u.name}?`,
+      body: `They won't be able to sign in until reactivated.`,
+      confirmLabel: 'Deactivate',
+      destructive: true,
+    });
+    if (!ok) return;
     try {
       const r = await fetch('/api/users', {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },

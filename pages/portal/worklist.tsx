@@ -23,13 +23,13 @@ import { fmtINR } from '../../lib/fmt';
 type View = 'all' | 'followup' | 'candidates' | 'active-holds' | 'stuck90' | 'credits' | 'top20';
 
 const VIEWS: Array<{ key: View; label: string; hint: string }> = [
+  { key: 'all',          label: 'All my accounts',  hint: 'Every account in your scope' },
   { key: 'followup',     label: 'Need follow-up',   hint: 'Accounts whose next-followup date has passed' },
   { key: 'candidates',   label: 'Hold candidates',  hint: 'Flagged for hold, awaiting owner approval' },
   { key: 'active-holds', label: 'On hold',          hint: 'Bookings currently blocked for these parties' },
   { key: 'stuck90',      label: '90+ stuck',        hint: 'Accounts with money stuck > 90 days' },
   { key: 'credits',      label: 'Customer credits', hint: 'Customers in credit — refunds / advances' },
   { key: 'top20',        label: 'Top 20 outstanding', hint: 'Biggest exposure right now' },
-  { key: 'all',          label: 'All my accounts',  hint: 'Every account in your scope' },
 ];
 
 type AccountRow = {
@@ -48,12 +48,17 @@ export default function WorklistPage() {
   );
 }
 
+type SortKey = 'bill' | 'd90p' | 'party' | 'nextFu' | 'tier';
+type SortDir = 'asc' | 'desc';
+
 function Inner() {
-  const [view, setView] = useState<View>('followup');
+  const [view, setView] = useState<View>('all');
   const [rows, setRows] = useState<AccountRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
+  const [sortKey, setSortKey] = useState<SortKey>('bill');
+  const [sortDir, setSortDir] = useState<SortDir>('desc');
 
   // Load every row in the user's scope once (≤500 for any reasonable team).
   // Filtering happens client-side so changing the view is instant.
@@ -74,8 +79,30 @@ function Inner() {
       .finally(() => setLoading(false));
   }, []);
 
-  const filtered = useMemo(() => filterRows(rows, view), [rows, view]);
+  const filtered = useMemo(() => {
+    const arr = filterRows(rows, view);
+    arr.sort((a, b) => {
+      let av: any; let bv: any;
+      switch (sortKey) {
+        case 'bill':    av = a.bill;   bv = b.bill;   break;
+        case 'd90p':    av = a.d90p;   bv = b.d90p;   break;
+        case 'party':   av = a.party.toLowerCase(); bv = b.party.toLowerCase(); break;
+        case 'nextFu':  av = a.nextFu ? +new Date(a.nextFu) : Infinity;
+                        bv = b.nextFu ? +new Date(b.nextFu) : Infinity; break;
+        case 'tier':    av = a.tier; bv = b.tier; break;
+      }
+      if (av < bv) return sortDir === 'asc' ? -1 : 1;
+      if (av > bv) return sortDir === 'asc' ?  1 : -1;
+      return 0;
+    });
+    return arr;
+  }, [rows, view, sortKey, sortDir]);
   const meta = VIEWS.find(v => v.key === view)!;
+
+  function toggleSort(key: SortKey) {
+    if (key === sortKey) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    else { setSortKey(key); setSortDir(key === 'party' || key === 'tier' || key === 'nextFu' ? 'asc' : 'desc'); }
+  }
 
   return (
     <div style={{ maxWidth: 1180, margin: '0 auto', padding: '4px 4px 60px' }}>
@@ -132,13 +159,13 @@ function Inner() {
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
             <thead>
               <tr style={{ background: 'rgba(15,40,85,0.04)', borderBottom: '1px solid rgba(15,40,85,0.10)' }}>
-                <Th>Tier</Th>
-                <Th>Party</Th>
+                <SortableTh field="tier"   active={sortKey === 'tier'}   dir={sortDir} onSort={toggleSort}>Tier</SortableTh>
+                <SortableTh field="party"  active={sortKey === 'party'}  dir={sortDir} onSort={toggleSort}>Party</SortableTh>
                 <Th>Family</Th>
-                <Th align="right">Outstanding</Th>
-                <Th align="right">90+ stuck</Th>
+                <SortableTh field="bill"   active={sortKey === 'bill'}   dir={sortDir} onSort={toggleSort} align="right">Outstanding</SortableTh>
+                <SortableTh field="d90p"   active={sortKey === 'd90p'}   dir={sortDir} onSort={toggleSort} align="right">90+ stuck</SortableTh>
                 <Th>Hold</Th>
-                <Th>Next FU</Th>
+                <SortableTh field="nextFu" active={sortKey === 'nextFu'} dir={sortDir} onSort={toggleSort}>Next FU</SortableTh>
               </tr>
             </thead>
             <tbody>
@@ -203,6 +230,28 @@ function Th({ children, align }: { children: React.ReactNode; align?: 'left' | '
       padding: '10px 14px', fontSize: 10, letterSpacing: '.16em',
       textTransform: 'uppercase', color: 'var(--ink-soft)', fontWeight: 700,
     }}>{children}</th>
+  );
+}
+function SortableTh({
+  children, field, active, dir, onSort, align,
+}: {
+  children: React.ReactNode; field: SortKey;
+  active: boolean; dir: SortDir;
+  onSort: (k: SortKey) => void;
+  align?: 'left' | 'right';
+}) {
+  return (
+    <th style={{
+      textAlign: align || 'left',
+      padding: '10px 14px', fontSize: 10, letterSpacing: '.16em',
+      textTransform: 'uppercase', color: active ? 'var(--ink, #0F2855)' : 'var(--ink-soft)',
+      fontWeight: 700, cursor: 'pointer', userSelect: 'none',
+    }} onClick={() => onSort(field)}>
+      {children}{' '}
+      <span style={{ fontSize: 9, opacity: active ? 1 : 0.3 }}>
+        {active ? (dir === 'asc' ? '▲' : '▼') : '↕'}
+      </span>
+    </th>
   );
 }
 function Td({ children, align, mono, color }: {

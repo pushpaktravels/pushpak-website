@@ -28,6 +28,7 @@
 // ============================================================
 import { useCallback, useEffect, useState } from 'react';
 import { fmtINR, fmtDate, fmtDateTime, fmtRelative } from '../lib/fmt';
+import { useConfirm } from './ConfirmProvider';
 
 type Tab = 'account' | 'timeline' | 'contact';
 type ModalKind =
@@ -72,6 +73,8 @@ export function AccountDrawer({ accountId, onClose }: Props) {
   const [settlePromiseId, setSettlePromiseId] = useState<string | null>(null);
   const [tierMenuOpen, setTierMenuOpen] = useState(false);
   const [actionErr, setActionErr] = useState<string | null>(null);
+  // confirm dialog is consumed inside AccountTab where the quickSettle
+  // helpers are called — no need at this top scope yet.
 
   const loadData = useCallback(async (id: string) => {
     setLoading(true);
@@ -358,6 +361,7 @@ function AccountTab({
   setErr: (s: string | null) => void;
 }) {
   const a = data.account;
+  const confirm = useConfirm();
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -390,7 +394,7 @@ function AccountTab({
           <PaymentPlanDetails
             plan={data.paymentPlan}
             instalments={data.instalments}
-            onSettle={(instId, status) => quickSettleInstalment(data.paymentPlan.id, instId, status, refresh, setErr)}
+            onSettle={(instId, status) => quickSettleInstalment(data.paymentPlan.id, instId, status, refresh, setErr, confirm)}
           />
         </ContextCard>
       )}
@@ -417,8 +421,8 @@ function AccountTab({
         >
           <PromiseHistoryDetails promises={data.promises}
             onSettleKept={onSettlePromise}
-            onMarkBroken={(id) => quickSettle(id, 'Broken', refresh, setErr)}
-            onMarkCancelled={(id) => quickSettle(id, 'Cancelled', refresh, setErr)}
+            onMarkBroken={(id) => quickSettle(id, 'Broken', refresh, setErr, confirm)}
+            onMarkCancelled={(id) => quickSettle(id, 'Cancelled', refresh, setErr, confirm)}
           />
         </ContextCard>
       )}
@@ -660,10 +664,15 @@ async function quickSettleInstalment(
   instId: string,
   status: 'Received' | 'Broken' | 'Cancelled',
   refresh: () => void,
-  setErr: (s: string | null) => void
+  setErr: (s: string | null) => void,
+  confirmFn: (opts: { title: string; body?: string; destructive?: boolean }) => Promise<boolean>,
 ) {
   const label = status === 'Received' ? 'received' : status.toLowerCase();
-  if (!window.confirm(`Mark this instalment as ${label}?`)) return;
+  const ok = await confirmFn({
+    title: `Mark instalment as ${label}?`,
+    destructive: status !== 'Received',
+  });
+  if (!ok) return;
   setErr(null);
   try {
     // For 'Received', also set received = amount (full payment assumed)
@@ -953,8 +962,18 @@ function Empty({ label }: { label: string }) {
 }
 
 // ─── Module helpers (used by inline buttons / hold actions) ──
-async function quickSettle(id: string, status: 'Broken' | 'Cancelled', refresh: () => void, setErr: (s: string | null) => void) {
-  if (!window.confirm(`Mark this promise as ${status}?`)) return;
+async function quickSettle(
+  id: string,
+  status: 'Broken' | 'Cancelled',
+  refresh: () => void,
+  setErr: (s: string | null) => void,
+  confirmFn: (opts: { title: string; body?: string; destructive?: boolean }) => Promise<boolean>,
+) {
+  const ok = await confirmFn({
+    title: `Mark promise as ${status}?`,
+    destructive: true,
+  });
+  if (!ok) return;
   setErr(null);
   try {
     const r = await fetch(`/api/promises/${encodeURIComponent(id)}`, {

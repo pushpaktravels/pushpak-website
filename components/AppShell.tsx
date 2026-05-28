@@ -15,7 +15,7 @@
 // previous page during a soft navigation) shows through. Just the
 // centered pushpak logo + a thin animated bar.
 // ============================================================
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/router';
 import Head from 'next/head';
 import { Sidebar, type CurrentUser } from './Sidebar';
@@ -67,9 +67,51 @@ export function AppShell({
       <div className="shell">
         <Sidebar user={user} />
         <Header user={user} title={title} crumb={crumb} />
-        <main className="content scroll">{children}</main>
+        <MainWithScrollTop>{children}</MainWithScrollTop>
       </div>
     </>
+  );
+}
+
+// Scrollable main with a floating "back to top" button that appears
+// after the user has scrolled past a threshold. Mounted at the shell
+// level so every page gets it for free.
+function MainWithScrollTop({ children }: { children: React.ReactNode }) {
+  const ref = useRef<HTMLElement | null>(null);
+  const [show, setShow] = useState(false);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const onScroll = () => setShow(el.scrollTop > 400);
+    el.addEventListener('scroll', onScroll, { passive: true });
+    return () => el.removeEventListener('scroll', onScroll);
+  }, []);
+
+  return (
+    <main ref={ref} className="content scroll" style={{ position: 'relative' }}>
+      {children}
+      {show && (
+        <button
+          onClick={() => ref.current?.scrollTo({ top: 0, behavior: 'smooth' })}
+          aria-label="Back to top"
+          style={{
+            position: 'fixed', right: 24, bottom: 24, zIndex: 800,
+            width: 44, height: 44, borderRadius: 999,
+            background: 'linear-gradient(180deg,#1A3F7E,#0F2855)',
+            color: '#fff', border: 'none', cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            boxShadow: '0 8px 24px rgba(15,40,85,0.30)',
+          }}
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
+               stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 19V5" />
+            <path d="M5 12l7-7 7 7" />
+          </svg>
+        </button>
+      )}
+    </main>
   );
 }
 
