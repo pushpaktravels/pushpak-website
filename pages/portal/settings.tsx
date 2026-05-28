@@ -19,19 +19,43 @@ type Setting = { key: string; value: string; category: string; updatedAt: string
 
 // ─── Category metadata (display title + description + sort order) ─
 const CATEGORY_META: Record<string, { title: string; description: string; order: number }> = {
-  escalation:     { title: 'Escalation Thresholds',  description: 'Calls × max days before bumping to next stage, per Tier × Stage',  order: 1 },
-  'auto-hold':    { title: 'Auto Booking Hold',      description: 'Rules that flag accounts as hold candidates during refresh',       order: 2 },
-  worklist:       { title: 'Worklist / Alerts',      description: 'Thresholds for "Due Soon" and "Stale"',                              order: 3 },
-  alerts:         { title: 'Worklist / Alerts',      description: 'Thresholds for "Due Soon" and "Stale"',                              order: 3 },
-  email:          { title: 'Daily Briefing Email',   description: 'Sent to this address at the configured hour',                       order: 4 },
-  points:         { title: 'Points Engine',          description: 'How many points each action awards or deducts',                     order: 5 },
-  branding:       { title: 'Branding',               description: 'Names shown in the daily email and elsewhere',                       order: 6 },
-  tiers:          { title: 'Tier Thresholds',        description: 'Outstanding cutoffs for tier classification',                       order: 7 },
+  security:       { title: 'Security',               description: 'Owner IP allowlist, idle timeout, PII masking',                    order: 0 },
+  escalation:     { title: 'Escalation thresholds',  description: 'Calls × max days before bumping to next stage, per Tier × Stage',  order: 1 },
+  'auto-hold':    { title: 'Auto booking hold',      description: 'Rules that flag accounts as hold candidates during refresh',       order: 2 },
+  worklist:       { title: 'Worklist & alerts',      description: 'Thresholds for "Due Soon" and "Stale"',                              order: 3 },
+  alerts:         { title: 'Worklist & alerts',      description: 'Thresholds for "Due Soon" and "Stale"',                              order: 3 },
+  email:          { title: 'Daily briefing email',   description: 'Sent to this address at the configured hour',                       order: 4 },
+  whatsapp:       { title: 'WhatsApp templates',     description: 'The 5 reminder messages used by Send Reminder',                      order: 5 },
+  points:         { title: 'Points engine',          description: 'How many points each action awards or deducts',                     order: 6 },
+  branding:       { title: 'Branding',               description: 'Names shown in the daily email and elsewhere',                       order: 7 },
+  tiers:          { title: 'Tier thresholds',        description: 'Outstanding cutoffs for tier classification',                       order: 8 },
   misc:           { title: 'Other',                  description: 'Uncategorised settings',                                            order: 99 },
 };
 function metaFor(cat: string) {
-  return CATEGORY_META[cat] || { title: cat, description: '', order: 50 };
+  return CATEGORY_META[cat] || { title: titleCase(cat), description: '', order: 50 };
 }
+
+// "DUE_SOON_DAYS" → "Due soon days" — used to render setting keys.
+function titleCase(key: string): string {
+  return key
+    .replace(/^WA_TPL_/, 'WhatsApp · ')   // pretty prefix for templates
+    .replace(/_/g, ' ')
+    .toLowerCase()
+    .replace(/(^|\s)(\S)/g, (_, b, c) => b + c.toUpperCase());
+}
+
+// Long-form descriptions for individual settings (shown under the
+// key on each row). Falls back to nothing if not listed.
+const KEY_DESCRIPTIONS: Record<string, string> = {
+  SESSION_IDLE_MINUTES:  'Auto sign-out after this many minutes of inactivity (currently a fixed 30 min on the client).',
+  OWNER_IP_ALLOWLIST:    'Comma-separated IPs or CIDRs. When set, owner logins are blocked from other IPs. Leave empty to disable.',
+  PII_MASK_ENABLED:      'Whether phone numbers / emails are masked in lists. (Currently always masked — reveal is per-field via audit.)',
+  WA_TPL_GENTLE:           'Used by Send Reminder → Gentle reminder. Variables: {party} {outstanding} {owner} {days} {exec}',
+  WA_TPL_FIRM:             'Used by Send Reminder → Firm reminder. Variables: {party} {outstanding} {owner} {days} {exec}',
+  WA_TPL_LEGAL:            'Used by Send Reminder → Legal warning. Variables: {party} {outstanding} {owner} {days} {exec}',
+  WA_TPL_PROMISE_BROKEN:   'Used by Send Reminder → Promise broken. Variables: {party} {outstanding} {owner} {days} {exec}',
+  WA_TPL_PAYMENT_RECEIVED: 'Used by Send Reminder → Payment received. Variables: {party} {outstanding} {owner} {days} {exec}',
+};
 
 export default function SettingsPage() {
   const [settings, setSettings] = useState<Setting[] | null>(null);
@@ -183,35 +207,63 @@ export default function SettingsPage() {
                   {list.map((s, i) => {
                     const editing = edits[s.key] !== undefined;
                     const current = editing ? edits[s.key] : s.value;
+                    // WhatsApp templates + descriptions get a textarea
+                    // (long, multi-line). Everything else stays a single-
+                    // line input. The address/list value can also wrap.
+                    const isLong = s.key.startsWith('WA_TPL_')
+                      || s.key === 'OWNER_IP_ALLOWLIST'
+                      || (s.value && s.value.length > 80);
+                    const desc = KEY_DESCRIPTIONS[s.key];
                     return (
                       <div key={s.key} style={{
-                        padding: '14px 22px',
+                        padding: '16px 22px',
                         borderBottom: i === list.length - 1 ? 'none' : '1px solid var(--line, #e7eaf0)',
-                        display: 'grid', gridTemplateColumns: '1fr 240px', gap: 18, alignItems: 'center',
+                        display: 'grid',
+                        gridTemplateColumns: isLong ? '1fr' : '1fr 280px',
+                        gap: 14, alignItems: isLong ? 'stretch' : 'center',
                       }}>
                         <div>
                           <div style={{
-                            fontFamily: "inherit",
-                            fontSize: 12.5, color: 'var(--navy-deep)', fontWeight: 600,
-                            letterSpacing: '.02em',
-                          }}>{s.key}</div>
-                          <div style={{ fontSize: 10.5, color: 'var(--t-3)', marginTop: 4, letterSpacing: '.02em' }}>
-                            Updated {fmtDateTime(s.updatedAt)}{s.updatedBy && ` · by ${s.updatedBy}`}
+                            fontFamily: 'inherit',
+                            fontSize: 13.5, color: 'var(--navy-deep)', fontWeight: 700,
+                          }}>{titleCase(s.key)}</div>
+                          {desc && (
+                            <div style={{ fontSize: 12, color: 'var(--t-2)', marginTop: 4, lineHeight: 1.5 }}>
+                              {desc}
+                            </div>
+                          )}
+                          <div style={{ fontSize: 10.5, color: 'var(--t-3)', marginTop: 6 }}>
+                            Last updated {fmtDateTime(s.updatedAt)}{s.updatedBy && ` · by ${s.updatedBy}`}
+                            <span style={{ marginLeft: 10, fontFamily: 'monospace', opacity: 0.6 }}>{s.key}</span>
                           </div>
                         </div>
-                        <input
-                          type="text"
-                          value={current}
-                          onChange={e => setEdits(prev => ({ ...prev, [s.key]: e.target.value }))}
-                          style={{
-                            fontSize: 14, padding: '9px 12px',
-                            border: `1px solid ${editing ? 'var(--amber)' : 'var(--line, #e7eaf0)'}`,
-                            borderRadius: 6, outline: 'none', color: 'var(--navy-deep)',
-                            fontFamily: "inherit",
-                            background: editing ? 'rgba(176,127,28,.07)' : '#fff',
-                            transition: 'border-color .12s',
-                          }}
-                        />
+                        {isLong ? (
+                          <textarea
+                            value={current} rows={s.key.startsWith('WA_TPL_') ? 5 : 2}
+                            onChange={e => setEdits(prev => ({ ...prev, [s.key]: e.target.value }))}
+                            style={{
+                              fontSize: 13.5, padding: '10px 12px',
+                              border: `1px solid ${editing ? 'var(--amber)' : 'var(--line, #e7eaf0)'}`,
+                              borderRadius: 8, outline: 'none', color: 'var(--navy-deep)',
+                              fontFamily: 'inherit', lineHeight: 1.55,
+                              background: editing ? 'rgba(176,127,28,.07)' : '#fff',
+                              resize: 'vertical', minHeight: 60,
+                            }}
+                          />
+                        ) : (
+                          <input
+                            type="text"
+                            value={current}
+                            onChange={e => setEdits(prev => ({ ...prev, [s.key]: e.target.value }))}
+                            style={{
+                              fontSize: 14, padding: '9px 12px',
+                              border: `1px solid ${editing ? 'var(--amber)' : 'var(--line, #e7eaf0)'}`,
+                              borderRadius: 6, outline: 'none', color: 'var(--navy-deep)',
+                              fontFamily: 'inherit',
+                              background: editing ? 'rgba(176,127,28,.07)' : '#fff',
+                            }}
+                          />
+                        )}
                       </div>
                     );
                   })}

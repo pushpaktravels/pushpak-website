@@ -41,6 +41,9 @@ export function SendReminder({
   const [phoneNeeded, setPhoneNeeded] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  // Two-step pick → preview → send flow.
+  const [selected, setSelected] = useState<Template | null>(null);
+  const [editedMessage, setEditedMessage] = useState<string>('');
 
   useEffect(() => {
     if (!open || templates) return;
@@ -84,30 +87,43 @@ export function SendReminder({
       .replaceAll('{exec}',        execName || 'Pushpak Travels');
   }
 
-  async function pick(tpl: Template) {
+  function pick(tpl: Template) {
+    // Step 1: select a template — show the rendered message in a
+    // big readable box. The user re-reads it (and can edit if they
+    // want) before hitting Send.
+    setSelected(tpl);
+    setEditedMessage(render(tpl.body));
+    setErr(null);
+  }
+
+  async function send() {
+    if (!selected) return;
     setErr(null);
     let target = (phone || '').replace(/\D/g, '');
     if (!target && phoneInput) target = phoneInput.replace(/\D/g, '');
     if (!target) { setPhoneNeeded(true); return; }
     if (target.length === 10) target = `91${target}`;     // assume India when bare 10-digit
-    const message = render(tpl.body);
-    setBusy(tpl.key);
+    setBusy(selected.key);
     try {
       // Log first, then open — that way the audit reflects intent
       // even if the user closes the WA tab without sending.
       await fetch('/api/whatsapp/log', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ party, template: tpl.key, to: target, message }),
+        body: JSON.stringify({ party, template: selected.key, to: target, message: editedMessage }),
       }).then(x => x.json());
-      window.open(`https://wa.me/${target}?text=${encodeURIComponent(message)}`, '_blank');
+      window.open(`https://wa.me/${target}?text=${encodeURIComponent(editedMessage)}`, '_blank');
       onSent?.();
       setOpen(false);
+      setSelected(null);
     } catch (e: any) {
       setErr(e.message || 'Failed to log');
     } finally {
       setBusy(null);
     }
   }
+
+  // Reset selection when the modal closes
+  useEffect(() => { if (!open) { setSelected(null); setEditedMessage(''); } }, [open]);
 
   return (
     <>
@@ -176,31 +192,77 @@ export function SendReminder({
               </div>
             )}
 
-            <div style={{ overflowY: 'auto', padding: '8px 0' }}>
-              {!templates && <div style={{ padding: 18, color: 'var(--ink-soft)' }}>Loading templates…</div>}
-              {templates && templates.map(t => (
-                <button key={t.key} onClick={() => pick(t)} disabled={busy === t.key}
+            {/* PICK step — list templates */}
+            {!selected && (
+              <div style={{ overflowY: 'auto', padding: '8px 0' }}>
+                {!templates && <div style={{ padding: 18, color: 'var(--ink-soft)' }}>Loading templates…</div>}
+                {templates && templates.map(t => (
+                  <button key={t.key} onClick={() => pick(t)} disabled={busy === t.key}
+                    style={{
+                      display: 'block', width: '100%', textAlign: 'left',
+                      padding: '12px 22px',
+                      background: busy === t.key ? 'rgba(15,40,85,0.06)' : 'transparent',
+                      border: 'none', borderBottom: '1px solid rgba(15,40,85,0.04)',
+                      cursor: busy ? 'wait' : 'pointer', fontFamily: 'inherit',
+                    }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
+                      <span style={{
+                        fontSize: 10, fontWeight: 700, letterSpacing: '.18em', textTransform: 'uppercase',
+                        padding: '3px 8px', borderRadius: 4,
+                        background: t.tone === 'rust' ? 'rgba(178,79,55,.16)' : t.tone === 'amber' ? 'rgba(217,165,69,.18)' : 'rgba(46,108,84,.14)',
+                        color: t.tone === 'rust' ? 'var(--rust)' : t.tone === 'amber' ? 'var(--amber, #B58430)' : 'var(--sage, #2E6C54)',
+                      }}>{t.label}</span>
+                      <span style={{ fontSize: 10.5, color: 'var(--ink-soft)' }}>Click to preview</span>
+                    </div>
+                    <div style={{ fontSize: 12, color: 'var(--ink-soft)', lineHeight: 1.5,
+                                  display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
+                                  overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {render(t.body)}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* PREVIEW step — full message in a box, editable, then Send */}
+            {selected && (
+              <div style={{ padding: '14px 22px 4px', overflowY: 'auto' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+                  <span style={{
+                    fontSize: 10, fontWeight: 700, letterSpacing: '.18em', textTransform: 'uppercase',
+                    padding: '3px 8px', borderRadius: 4,
+                    background: selected.tone === 'rust' ? 'rgba(178,79,55,.16)' : selected.tone === 'amber' ? 'rgba(217,165,69,.18)' : 'rgba(46,108,84,.14)',
+                    color: selected.tone === 'rust' ? 'var(--rust)' : selected.tone === 'amber' ? 'var(--amber, #B58430)' : 'var(--sage, #2E6C54)',
+                  }}>{selected.label}</span>
+                  <button onClick={() => { setSelected(null); setEditedMessage(''); }} style={{
+                    background: 'transparent', border: 'none', cursor: 'pointer',
+                    color: 'var(--ink-soft)', fontSize: 10.5, fontWeight: 700,
+                    letterSpacing: '.18em', textTransform: 'uppercase', fontFamily: 'inherit',
+                  }}>← Pick another</button>
+                </div>
+                <label style={{
+                  display: 'block', fontSize: 10, letterSpacing: '.22em', textTransform: 'uppercase',
+                  color: 'var(--ink-soft)', fontWeight: 700, marginBottom: 6,
+                }}>Message preview · edit if you like</label>
+                <textarea
+                  value={editedMessage}
+                  onChange={e => setEditedMessage(e.target.value)}
+                  rows={10}
                   style={{
-                    display: 'block', width: '100%', textAlign: 'left',
-                    padding: '12px 22px',
-                    background: busy === t.key ? 'rgba(15,40,85,0.06)' : 'transparent',
-                    border: 'none', borderBottom: '1px solid rgba(15,40,85,0.04)',
-                    cursor: busy ? 'wait' : 'pointer', fontFamily: 'inherit',
-                  }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
-                    <span style={{
-                      fontSize: 10, fontWeight: 700, letterSpacing: '.18em', textTransform: 'uppercase',
-                      padding: '3px 8px', borderRadius: 4,
-                      background: t.tone === 'rust' ? 'rgba(178,79,55,.16)' : t.tone === 'amber' ? 'rgba(217,165,69,.18)' : 'rgba(46,108,84,.14)',
-                      color: t.tone === 'rust' ? 'var(--rust)' : t.tone === 'amber' ? 'var(--amber, #B58430)' : 'var(--sage, #2E6C54)',
-                    }}>{t.label}</span>
-                  </div>
-                  <div style={{ fontSize: 12, color: 'var(--ink-soft)', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>
-                    {render(t.body)}
-                  </div>
-                </button>
-              ))}
-            </div>
+                    width: '100%', minHeight: 200,
+                    padding: '14px 16px', borderRadius: 10,
+                    border: '1px solid rgba(15,40,85,0.18)',
+                    background: '#fff', color: 'var(--ink, #0F2855)',
+                    fontFamily: 'inherit', fontSize: 13.5, lineHeight: 1.65,
+                    outline: 'none', resize: 'vertical', whiteSpace: 'pre-wrap',
+                  }}
+                />
+                <div style={{ marginTop: 8, fontSize: 11, color: 'var(--ink-soft)', display: 'flex', justifyContent: 'space-between' }}>
+                  <span>{editedMessage.length} characters</span>
+                  <span>WhatsApp will open with this message pre-filled</span>
+                </div>
+              </div>
+            )}
 
             {err && <div style={{ padding: '10px 22px', color: 'var(--rust)', fontSize: 12 }}>{err}</div>}
 
@@ -209,7 +271,7 @@ export function SendReminder({
               display: 'flex', alignItems: 'center', gap: 10,
             }}>
               <div style={{ fontSize: 11.5, color: 'var(--ink-soft)' }}>
-                Picking a template opens WhatsApp Web and logs the send to Timeline.
+                {selected ? 'Sending logs to Timeline + opens WhatsApp Web.' : 'Pick a template to preview the message.'}
               </div>
               <button onClick={() => setOpen(false)} style={{
                 marginLeft: 'auto', padding: '8px 14px', borderRadius: 6,
@@ -217,7 +279,19 @@ export function SendReminder({
                 border: '1px solid rgba(15,40,85,0.22)',
                 fontSize: 11, fontWeight: 700, letterSpacing: '.18em', textTransform: 'uppercase',
                 cursor: 'pointer', fontFamily: 'inherit',
-              }}>Close</button>
+              }}>Cancel</button>
+              {selected && (
+                <button onClick={send} disabled={!!busy || !editedMessage.trim()} style={{
+                  padding: '10px 18px', borderRadius: 6,
+                  background: busy ? 'rgba(15,40,85,0.25)' : 'linear-gradient(180deg,#3CB371,#2E6C54)',
+                  color: '#fff', border: 'none',
+                  fontSize: 11, fontWeight: 700, letterSpacing: '.22em', textTransform: 'uppercase',
+                  cursor: busy ? 'wait' : 'pointer', fontFamily: 'inherit',
+                  display: 'inline-flex', alignItems: 'center', gap: 6,
+                }}>
+                  {busy ? 'Sending…' : 'Send via WhatsApp →'}
+                </button>
+              )}
             </div>
           </div>
         </div>
