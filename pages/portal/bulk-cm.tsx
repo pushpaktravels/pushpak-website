@@ -56,10 +56,13 @@ function Inner() {
   const [toast, setToast] = useState<string | null>(null);
   const confirm = useConfirm();
 
-  const sortCtl = useSort<Account, SortKey>('bill', 'desc', {
+  // Family default — assigning a whole family to one CM in a batch
+  // is the most common workflow, so group accounts that way out of
+  // the box. Click any other column to switch.
+  const sortCtl = useSort<Account, SortKey>('family', 'asc', {
     tier:   r => r.tier,
     party:  r => r.party.toLowerCase(),
-    family: r => (r.family || '').toLowerCase(),
+    family: r => (r.family || 'zzz').toLowerCase(),
     exec:   r => (r.exec   || '').toLowerCase(),
     cm:     r => (r.cm     || '').toLowerCase(),
     bill:   r => r.bill,
@@ -111,6 +114,35 @@ function Inner() {
     });
   }, [accounts, search, familyFilter, execFilter, tierFilter, noCMOnly]);
   const sorted = useMemo(() => sortCtl.sort(filtered), [filtered, sortCtl.key, sortCtl.dir]);
+
+  // Family-grouping mode — render a sub-header row before each new
+  // family with a "select all in this family" checkbox.
+  const familyGrouped = sortCtl.key === 'family';
+  const familyGroups = useMemo(() => {
+    if (!familyGrouped) return null;
+    const map = new Map<string, { ids: string[]; total: number; noCM: number }>();
+    for (const a of sorted) {
+      const k = a.family || '(no family)';
+      const g = map.get(k) || { ids: [], total: 0, noCM: 0 };
+      g.ids.push(a.id);
+      g.total += a.bill;
+      if (!a.cm) g.noCM += 1;
+      map.set(k, g);
+    }
+    return map;
+  }, [familyGrouped, sorted]);
+
+  function toggleFamily(famKey: string) {
+    const g = familyGroups?.get(famKey);
+    if (!g) return;
+    const allSelected = g.ids.every(id => selected.has(id));
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (allSelected) g.ids.forEach(id => next.delete(id));
+      else             g.ids.forEach(id => next.add(id));
+      return next;
+    });
+  }
 
   // CM load (count + outstanding by CM)
   const cmLoad = useMemo(() => {
@@ -279,28 +311,73 @@ function Inner() {
               </tr>
             </thead>
             <tbody>
-              {sorted.map(a => (
-                <tr key={a.id} style={{ borderBottom: '1px solid rgba(15,40,85,0.06)' }}>
-                  <Td><input type="checkbox" checked={selected.has(a.id)} onChange={() => toggleRow(a.id)} /></Td>
-                  <Td><TierBadge tier={a.tier} /></Td>
-                  <Td>
-                    <button onClick={() => setOpenId(a.id)} style={{
-                      background: 'transparent', border: 'none', padding: 0, cursor: 'pointer',
-                      fontWeight: 600, color: 'var(--navy-deep)', textAlign: 'left',
-                      fontFamily: 'inherit', fontSize: 13,
-                    }}>{a.party}</button>
-                  </Td>
-                  <Td>{a.family || '—'}</Td>
-                  <Td>{a.exec || '—'}</Td>
-                  <Td>{a.cm || <span style={{ color: 'var(--rust, #B5483D)', fontWeight: 600 }}>— none —</span>}</Td>
-                  <Td align="right" mono>{fmtINR(a.bill)}</Td>
-                </tr>
-              ))}
-              {sorted.length === 0 && (
-                <tr><td colSpan={7} style={{ padding: 24, textAlign: 'center', color: 'var(--ink-soft)', fontStyle: 'italic' }}>
-                  No accounts match your filters.
-                </td></tr>
-              )}
+              {(() => {
+                let lastFam: string | null | undefined;
+                const out: React.ReactNode[] = [];
+                sorted.forEach(a => {
+                  if (familyGrouped) {
+                    const fam = a.family || '(no family)';
+                    if (fam !== lastFam) {
+                      const g = familyGroups?.get(fam);
+                      const allSelectedInFam = g ? g.ids.every(id => selected.has(id)) : false;
+                      const anySelectedInFam = g ? g.ids.some(id => selected.has(id)) : false;
+                      out.push(
+                        <tr key={`fam-${fam}`} style={{ background: 'rgba(15,40,85,0.06)' }}>
+                          <td style={{ padding: '8px 14px' }}>
+                            <input
+                              type="checkbox"
+                              checked={allSelectedInFam}
+                              ref={el => { if (el) el.indeterminate = !allSelectedInFam && anySelectedInFam; }}
+                              onChange={() => toggleFamily(fam)}
+                              title="Select all accounts in this family"
+                            />
+                          </td>
+                          <td colSpan={6} style={{ padding: '8px 14px' }}>
+                            <div style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
+                              <span style={{
+                                fontSize: 11, letterSpacing: '.22em', textTransform: 'uppercase',
+                                fontWeight: 700, color: 'var(--ink, #0F2855)',
+                              }}>{fam}</span>
+                              {g && (
+                                <span style={{ fontSize: 11.5, color: 'var(--ink-soft)' }}>
+                                  {g.ids.length} account{g.ids.length === 1 ? '' : 's'} · {fmtINR(g.total)}
+                                  {g.noCM > 0 && <> · <span style={{ color: 'var(--rust, #B5483D)', fontWeight: 600 }}>{g.noCM} with no CM</span></>}
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                      lastFam = fam;
+                    }
+                  }
+                  out.push(
+                    <tr key={a.id} style={{ borderBottom: '1px solid rgba(15,40,85,0.06)' }}>
+                      <Td><input type="checkbox" checked={selected.has(a.id)} onChange={() => toggleRow(a.id)} /></Td>
+                      <Td><TierBadge tier={a.tier} /></Td>
+                      <Td>
+                        <button onClick={() => setOpenId(a.id)} style={{
+                          background: 'transparent', border: 'none', padding: 0, cursor: 'pointer',
+                          fontWeight: 600, color: 'var(--navy-deep)', textAlign: 'left',
+                          fontFamily: 'inherit', fontSize: 13,
+                        }}>{a.party}</button>
+                      </Td>
+                      <Td>{a.family || '—'}</Td>
+                      <Td>{a.exec || '—'}</Td>
+                      <Td>{a.cm || <span style={{ color: 'var(--rust, #B5483D)', fontWeight: 600 }}>— none —</span>}</Td>
+                      <Td align="right" mono>{fmtINR(a.bill)}</Td>
+                    </tr>
+                  );
+                });
+                if (sorted.length === 0) {
+                  out.push(
+                    <tr key="empty"><td colSpan={7} style={{ padding: 24, textAlign: 'center', color: 'var(--ink-soft)', fontStyle: 'italic' }}>
+                      No accounts match your filters.
+                    </td></tr>
+                  );
+                }
+                return out;
+              })()}
             </tbody>
           </table>
         </div>

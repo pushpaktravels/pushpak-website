@@ -74,18 +74,21 @@ export default function HoldCheckPage() {
     alert:  r => r.alert  || '',
     exec:   r => (r.exec  || '').toLowerCase(),
   });
-  const candidateSort = useSort<HoldRow, BoardSortKey>('bill', 'desc', {
+  // Family default on both boards so blocked parties from the same
+  // family cluster together — useful when one customer has multiple
+  // accounts all blocked at once.
+  const candidateSort = useSort<HoldRow, BoardSortKey>('family', 'asc', {
     party:   r => r.party.toLowerCase(),
-    family:  r => (r.family || '').toLowerCase(),
+    family:  r => (r.family || 'zzz').toLowerCase(),
     reason:  r => (r.reason || '').toLowerCase(),
     bill:    r => Number(r.bill),
     d90p:    r => Number(r.d90p),
     exec:    r => (r.exec || '').toLowerCase(),
     addedOn: r => +new Date(r.addedOn),
   });
-  const activeSort = useSort<HoldRow, BoardSortKey>('bill', 'desc', {
+  const activeSort = useSort<HoldRow, BoardSortKey>('family', 'asc', {
     party:   r => r.party.toLowerCase(),
-    family:  r => (r.family || '').toLowerCase(),
+    family:  r => (r.family || 'zzz').toLowerCase(),
     reason:  r => (r.reason || '').toLowerCase(),
     bill:    r => Number(r.bill),
     d90p:    r => Number(r.d90p),
@@ -357,6 +360,7 @@ function HoldBoard({
           <thead>
             <tr style={{ borderBottom: '1px solid rgba(15,40,85,0.06)' }}>
               <SortableTh field="party"  active={sortKey === 'party'}  dir={sortDir} onSort={onSort}>Party</SortableTh>
+              <SortableTh field="family" active={sortKey === 'family'} dir={sortDir} onSort={onSort}>Family</SortableTh>
               <SortableTh field="reason" active={sortKey === 'reason'} dir={sortDir} onSort={onSort}>Reason</SortableTh>
               <SortableTh field="bill"   active={sortKey === 'bill'}   dir={sortDir} onSort={onSort} align="right">Outstanding</SortableTh>
               <SortableTh field="d90p"   active={sortKey === 'd90p'}   dir={sortDir} onSort={onSort} align="right">90+ stuck</SortableTh>
@@ -365,43 +369,83 @@ function HoldBoard({
             </tr>
           </thead>
           <tbody>
-            {rows.map(r => (
-              <tr
-                key={r.id}
-                style={{ borderBottom: '1px solid rgba(15,40,85,0.04)' }}
-              >
-                <Td>
-                  <button onClick={() => r.accountId && onOpen(r.accountId)}
-                    disabled={!r.accountId}
-                    style={{
-                      background: 'transparent', border: 'none', padding: 0,
-                      cursor: r.accountId ? 'pointer' : 'default',
-                      fontWeight: 600, color: 'var(--navy-deep)',
-                      textAlign: 'left', fontFamily: 'inherit', fontSize: 13,
-                    }}>{r.party}</button>
-                  {r.family && <div style={{ fontSize: 11, color: 'var(--ink-soft)', marginTop: 2 }}>{r.family}</div>}
-                </Td>
-                <Td>
-                  <div style={{ fontSize: 12.5, color: 'var(--ink-soft)' }}>{r.reason}</div>
-                </Td>
-                <Td align="right" mono>{fmtINR(r.bill)}</Td>
-                <Td align="right" mono>
-                  <span style={{ color: r.d90p > 0 ? 'var(--rust)' : 'var(--ink-soft)' }}>
-                    {r.d90p > 0 ? fmtINR(r.d90p) : '—'}
-                  </span>
-                </Td>
-                <Td>{r.exec || '—'}</Td>
-                <Td align="right">
-                  <div style={{
-                    display: 'inline-flex', gap: 6,
-                    opacity: actingId === r.id ? 0.5 : 1,
-                    pointerEvents: actingId === r.id ? 'none' : 'auto',
-                  }}>
-                    {actions(r)}
-                  </div>
-                </Td>
-              </tr>
-            ))}
+            {(() => {
+              // Pre-compute per-family totals so the sub-header can
+              // show "PATEL GROUP · 3 parties · ₹X exposure"
+              const famTotals = sortKey === 'family'
+                ? rows.reduce<Map<string, { n: number; bill: number; d90p: number }>>((m, r) => {
+                    const k = r.family || '(no family)';
+                    const cur = m.get(k) || { n: 0, bill: 0, d90p: 0 };
+                    cur.n += 1; cur.bill += Number(r.bill || 0); cur.d90p += Number(r.d90p || 0);
+                    m.set(k, cur);
+                    return m;
+                  }, new Map())
+                : null;
+              let lastFam: string | null | undefined;
+              const out: React.ReactNode[] = [];
+              rows.forEach(r => {
+                if (sortKey === 'family') {
+                  const fam = r.family || '(no family)';
+                  if (fam !== lastFam) {
+                    const t = famTotals?.get(fam);
+                    out.push(
+                      <tr key={`fam-${fam}`} style={{ background: 'rgba(15,40,85,0.06)' }}>
+                        <td colSpan={7} style={{ padding: '8px 14px' }}>
+                          <div style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
+                            <span style={{
+                              fontSize: 11, letterSpacing: '.22em', textTransform: 'uppercase',
+                              fontWeight: 700, color: 'var(--ink, #0F2855)',
+                            }}>{fam}</span>
+                            {t && (
+                              <span style={{ fontSize: 11.5, color: 'var(--ink-soft)' }}>
+                                {t.n} part{t.n === 1 ? 'y' : 'ies'} · {fmtINR(t.bill)}
+                                {t.d90p > 0 && <> · <span style={{ color: 'var(--rust, #B5483D)', fontWeight: 600 }}>{fmtINR(t.d90p)} stuck 90+</span></>}
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                    lastFam = fam;
+                  }
+                }
+                out.push(
+                  <tr key={r.id} style={{ borderBottom: '1px solid rgba(15,40,85,0.04)' }}>
+                    <Td>
+                      <button onClick={() => r.accountId && onOpen(r.accountId)}
+                        disabled={!r.accountId}
+                        style={{
+                          background: 'transparent', border: 'none', padding: 0,
+                          cursor: r.accountId ? 'pointer' : 'default',
+                          fontWeight: 600, color: 'var(--navy-deep)',
+                          textAlign: 'left', fontFamily: 'inherit', fontSize: 13,
+                        }}>{r.party}</button>
+                    </Td>
+                    <Td>{r.family || '—'}</Td>
+                    <Td>
+                      <div style={{ fontSize: 12.5, color: 'var(--ink-soft)' }}>{r.reason}</div>
+                    </Td>
+                    <Td align="right" mono>{fmtINR(r.bill)}</Td>
+                    <Td align="right" mono>
+                      <span style={{ color: r.d90p > 0 ? 'var(--rust)' : 'var(--ink-soft)' }}>
+                        {r.d90p > 0 ? fmtINR(r.d90p) : '—'}
+                      </span>
+                    </Td>
+                    <Td>{r.exec || '—'}</Td>
+                    <Td align="right">
+                      <div style={{
+                        display: 'inline-flex', gap: 6,
+                        opacity: actingId === r.id ? 0.5 : 1,
+                        pointerEvents: actingId === r.id ? 'none' : 'auto',
+                      }}>
+                        {actions(r)}
+                      </div>
+                    </Td>
+                  </tr>
+                );
+              });
+              return out;
+            })()}
           </tbody>
         </table>
       )}
