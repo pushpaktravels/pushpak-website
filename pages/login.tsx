@@ -20,6 +20,7 @@ export default function Login() {
   const [step, setStep] = useState<'creds' | 'totp' | 'enroll'>('creds');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const idleReason = router.query.reason === 'idle';
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -103,6 +104,14 @@ export default function Login() {
             </>
           )}
 
+          {idleReason && !error && (
+            <div style={{
+              color: '#B58430', fontSize: 12.5, margin: '10px 0', textAlign: 'center',
+              padding: '8px 12px', background: 'rgba(217,165,69,.10)', borderRadius: 6,
+            }}>
+              You were signed out due to 30 minutes of inactivity.
+            </div>
+          )}
           {error && (
             <div style={{ color: '#B5483D', fontSize: 12.5, margin: '10px 0', textAlign: 'center' }}>
               {error}

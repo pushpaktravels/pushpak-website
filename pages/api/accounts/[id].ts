@@ -19,6 +19,7 @@ import { z } from 'zod';
 import { query, queryOne, withTransaction, newId } from '@/lib/pg';
 import { requireAuth, visibleExecNames } from '@/lib/auth';
 import { audit } from '@/lib/audit';
+import { maskClient } from '@/lib/mask';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const user = await requireAuth(req, res);
@@ -84,11 +85,16 @@ async function handleGet(req: NextApiRequest, res: NextApiResponse, user: any, i
       );
     }
 
+    // PII masking — never return unmasked contact info in the default
+    // drawer payload. The Contact tab calls /api/clients/[party]/reveal
+    // to unmask individual fields on click, which writes an audit row.
+    const maskedClient = client ? maskClient(client) : null;
+
     return res.json({
       ok: true,
       data: {
         account,
-        client,
+        client: maskedClient,
         promises,
         holds,
         history,

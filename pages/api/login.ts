@@ -36,6 +36,22 @@ const BodySchema = z.object({
 const LOCKOUT_AFTER_ATTEMPTS = 5;
 const LOCKOUT_MIN = 15;
 
+// Tiny IPv4 + CIDR match. Supports "1.2.3.4" and "1.2.0.0/16".
+// Returns false for malformed entries.
+function ipMatches(ip: string, entry: string): boolean {
+  if (!ip || !entry) return false;
+  if (entry === ip) return true;
+  if (!entry.includes('/')) return false;
+  const [prefix, bitsStr] = entry.split('/');
+  const bits = parseInt(bitsStr, 10);
+  if (!isFinite(bits) || bits < 0 || bits > 32) return false;
+  const toInt = (s: string) => s.split('.').reduce((n, p) => (n << 8) + (parseInt(p, 10) & 0xff), 0) >>> 0;
+  const a = toInt(ip), b = toInt(prefix);
+  if (!isFinite(a) || !isFinite(b)) return false;
+  const mask = bits === 0 ? 0 : (~0 << (32 - bits)) >>> 0;
+  return (a & mask) === (b & mask);
+}
+
 // 2FA is OPT-IN for now. If a user has enrolled (totpSecret is set), the
 // login flow demands the code. If they haven't enrolled, password alone is
 // accepted. Owner/admin can enroll later from a settings page.
@@ -77,6 +93,25 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (!user.active) {
       await audit(req, user, 'LOGIN_FAIL', user.execId, { reason: 'inactive' });
       return res.status(401).json({ ok: false, error: 'Account inactive' });
+    }
+
+    // Owner IP allowlist — when configured, the owner role can only
+    // sign in from the IPs / CIDRs listed in the Setting. Empty value
+    // = no restriction. Other roles are not affected.
+    if (user.role === 'owner') {
+      const allowlistSetting = await queryOne<any>(
+        `SELECT value FROM "Setting" WHERE key = 'OWNER_IP_ALLOWLIST' LIMIT 1`
+      );
+      const raw = (allowlistSetting?.value || '').trim();
+      if (raw) {
+        const ip = getIp(req);
+        const ok = raw.split(',').map((x: string) => x.trim()).filter(Boolean)
+          .some((entry: string) => ipMatches(ip, entry));
+        if (!ok) {
+          await audit(req, user, 'LOGIN_FAIL', user.execId, { reason: 'ip_not_in_allowlist', ip });
+          return res.status(403).json({ ok: false, error: 'Owner login blocked: your IP is not on the allowlist.' });
+        }
+      }
     }
 
     if (user.lockedUntil && new Date(user.lockedUntil) > new Date()) {

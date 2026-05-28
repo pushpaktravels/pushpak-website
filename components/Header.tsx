@@ -5,6 +5,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/router';
 import type { CurrentUser } from './Sidebar';
+import { NotificationsBell } from './NotificationsBell';
 
 const fmtTime = new Intl.DateTimeFormat('en-IN', {
   hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false, timeZone: 'Asia/Kolkata',
@@ -36,6 +37,7 @@ export function Header({ user, title, crumb }: { user: CurrentUser; title: strin
       </div>
       <div className="header-actions">
         <span className="header-clock">{now}<span className="ist">IST</span></span>
+        <NotificationsBell />
         <div className="user-block">
           <div className="user-avatar">{initial}</div>
           <div>

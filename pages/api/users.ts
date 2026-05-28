@@ -28,6 +28,7 @@ const Update = z.object({
   active: z.boolean().optional(),
   scoreboard: z.boolean().optional(),
   password: z.string().min(8).max(200).optional(),
+  email: z.string().email().max(120).nullable().optional(),
   viewPerms: z.array(z.string().min(1).max(60)).max(60).optional(),
   viewReadOnly: z.array(z.string().min(1).max(60)).max(60).optional(),
 });
@@ -57,7 +58,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (req.method === 'GET') {
     try {
       const rows = await query<any>(
-        `SELECT id, "execId", name, role, badge, team, active, scoreboard,
+        `SELECT id, "execId", name, role, badge, team, active, scoreboard, email,
                 "viewPerms", "viewReadOnly", "totpEnrolledAt",
                 "lastLoginAt", "createdAt"
          FROM "User"
@@ -132,6 +133,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           if (u.scoreboard   !== undefined) { sets.push(`scoreboard   = $${p++}`);          params.push(u.scoreboard); }
           if (u.viewPerms    !== undefined) { sets.push(`"viewPerms"  = $${p++}`);          params.push(u.viewPerms); }
           if (u.viewReadOnly !== undefined) { sets.push(`"viewReadOnly" = $${p++}`);        params.push(u.viewReadOnly); }
+          if (u.email        !== undefined) { sets.push(`email        = $${p++}`);          params.push(u.email); }
           if (u.password     !== undefined) {
             const hash = await hashPassword(u.password);
             sets.push(`"passwordHash" = $${p++}`); params.push(hash);

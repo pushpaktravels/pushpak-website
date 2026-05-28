@@ -18,6 +18,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { AppShell } from '../../components/AppShell';
 import { AccountDrawer } from '../../components/AccountDrawer';
 import { TierBadge } from '../../components/TierBadge';
+import { SendReminder } from '../../components/SendReminder';
+import { ExportButton } from '../../components/ExportButton';
 import { fmtINR } from '../../lib/fmt';
 
 type View = 'all' | 'followup' | 'candidates' | 'active-holds' | 'stuck90' | 'credits' | 'top20';
@@ -159,8 +161,28 @@ function Inner() {
           ))}
         </select>
         <span style={{ fontSize: 12, color: 'var(--ink-soft)' }}>{meta.hint}</span>
-        <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--ink-soft)' }}>
-          {loading ? 'Loading…' : `${filtered.length} account${filtered.length === 1 ? '' : 's'}`}
+        <span style={{ marginLeft: 'auto', display: 'flex', gap: 12, alignItems: 'center' }}>
+          <span style={{ fontSize: 12, color: 'var(--ink-soft)' }}>
+            {loading ? 'Loading…' : `${filtered.length} account${filtered.length === 1 ? '' : 's'}`}
+          </span>
+          <ExportButton
+            fileName={`worklist-${view}`}
+            rows={filtered}
+            columns={[
+              { header: 'Tier',         get: r => r.tier },
+              { header: 'Party',        get: r => r.party },
+              { header: 'Family',       get: r => r.family || '' },
+              { header: 'Exec',         get: r => r.exec   || '' },
+              { header: 'CM',           get: r => r.cm     || '' },
+              { header: 'Outstanding',  get: r => r.bill, numeric: true },
+              { header: '0-30',         get: r => r.d30,  numeric: true },
+              { header: '31-60',        get: r => r.d60,  numeric: true },
+              { header: '61-90',        get: r => r.d90,  numeric: true },
+              { header: '90+',          get: r => r.d90p, numeric: true },
+              { header: 'Hold',         get: r => r.onHold || '' },
+              { header: 'Next Followup',get: r => r.nextFu ? new Date(r.nextFu).toLocaleDateString('en-IN') : '' },
+            ]}
+          />
         </span>
       </div>
 
@@ -190,6 +212,7 @@ function Inner() {
                 <SortableTh field="d90p"   active={sortKey === 'd90p'}   dir={sortDir} onSort={toggleSort} align="right">90+ stuck</SortableTh>
                 <Th>Hold</Th>
                 <SortableTh field="nextFu" active={sortKey === 'nextFu'} dir={sortDir} onSort={toggleSort}>Next FU</SortableTh>
+                <Th align="right" width="100">Action</Th>
               </tr>
             </thead>
             <tbody>
@@ -206,7 +229,7 @@ function Inner() {
                       const t = familyTotals?.get(fam);
                       out.push(
                         <tr key={`fam-${fam}`} style={{ background: 'rgba(15,40,85,0.06)' }}>
-                          <td colSpan={7} style={{ padding: '8px 14px' }}>
+                          <td colSpan={8} style={{ padding: '8px 14px' }}>
                             <div style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
                               <span style={{
                                 fontSize: 11, letterSpacing: '.22em', textTransform: 'uppercase',
@@ -242,6 +265,17 @@ function Inner() {
                       </Td>
                       <Td><HoldPill status={r.onHold} /></Td>
                       <Td>{r.nextFu ? new Date(r.nextFu).toLocaleDateString('en-IN') : '—'}</Td>
+                      <Td align="right">
+                        <span onClick={e => e.stopPropagation()}>
+                          <SendReminder
+                            party={r.party}
+                            outstanding={r.bill}
+                            daysOverdue={r.nextFu ? Math.max(0, Math.floor((Date.now() - +new Date(r.nextFu)) / 86400000)) : undefined}
+                            execName={r.exec || undefined}
+                            variant="icon"
+                          />
+                        </span>
+                      </Td>
                     </tr>
                   );
                 });
@@ -282,10 +316,10 @@ function filterRows(rows: AccountRow[], view: View): AccountRow[] {
 }
 
 // ─── Presentational bits ──────────────────────────────────────
-function Th({ children, align }: { children: React.ReactNode; align?: 'left' | 'right' }) {
+function Th({ children, align, width }: { children: React.ReactNode; align?: 'left' | 'right'; width?: string }) {
   return (
     <th style={{
-      textAlign: align || 'left',
+      textAlign: align || 'left', width,
       padding: '10px 14px', fontSize: 10, letterSpacing: '.16em',
       textTransform: 'uppercase', color: 'var(--ink-soft)', fontWeight: 700,
     }}>{children}</th>

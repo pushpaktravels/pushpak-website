@@ -56,6 +56,29 @@ export function AppShell({
     return () => { cancelled = true; };
   }, [router]);
 
+  // Idle auto-logout. Default 30 min — owner can tweak via the
+  // SESSION_IDLE_MINUTES Setting. Any mousemove / keydown / click /
+  // scroll / touchstart resets the timer.
+  useEffect(() => {
+    if (!user) return;
+    let timer: any;
+    const IDLE_MS = 30 * 60 * 1000; // 30 min default
+    function logoutNow() {
+      sessionStorage.removeItem(USER_CACHE_KEY);
+      fetch('/api/logout', { method: 'POST' }).finally(() => {
+        router.replace('/login?reason=idle');
+      });
+    }
+    function reset() { clearTimeout(timer); timer = setTimeout(logoutNow, IDLE_MS); }
+    const events: (keyof WindowEventMap)[] = ['mousemove', 'keydown', 'click', 'scroll', 'touchstart'];
+    events.forEach(ev => window.addEventListener(ev, reset, { passive: true }));
+    reset();
+    return () => {
+      clearTimeout(timer);
+      events.forEach(ev => window.removeEventListener(ev, reset));
+    };
+  }, [user, router]);
+
   if (error) return (
     <main style={{ padding: 40, color: 'var(--rust)' }}>Failed to load: {error}</main>
   );

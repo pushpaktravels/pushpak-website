@@ -29,6 +29,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { fmtINR, fmtDate, fmtDateTime, fmtRelative } from '../lib/fmt';
 import { useConfirm } from './ConfirmProvider';
+import { SendReminder } from './SendReminder';
 
 type Tab = 'account' | 'timeline' | 'contact';
 type ModalKind =
@@ -160,6 +161,22 @@ export function AccountDrawer({ accountId, onClose }: Props) {
             </h2>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
               {a && <TierDropdown tier={a.tier} open={tierMenuOpen} onToggle={() => setTierMenuOpen(o => !o)} onPick={changeTier} />}
+              {a && (
+                <button
+                  onClick={() => window.open(`/portal/statement/${encodeURIComponent(a.party)}`, '_blank')}
+                  title="Generate printable Statement of Accounts"
+                  style={{
+                    border: '1px solid rgba(15,40,85,0.18)', background: 'transparent', cursor: 'pointer',
+                    fontSize: 10.5, color: 'var(--ink)', padding: '6px 10px', borderRadius: 6,
+                    fontWeight: 700, letterSpacing: '.18em', textTransform: 'uppercase',
+                    fontFamily: 'inherit', display: 'inline-flex', alignItems: 'center', gap: 4,
+                  }}>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z M14 2v6h6 M16 13H8 M16 17H8 M10 9H8" />
+                  </svg>
+                  Statement
+                </button>
+              )}
               <button onClick={onClose} aria-label="Close" style={{
                 border: 'none', background: 'transparent', cursor: 'pointer',
                 fontSize: 22, color: 'var(--t-3)', lineHeight: 1, padding: 4,
@@ -474,6 +491,20 @@ function AccountTab({
         </div>
       </div>
 
+      {/* SEND REMINDER — primary WhatsApp action, sits on top of the
+          row of utility buttons so it's the first thing the eye lands
+          on when the drawer opens. */}
+      <div style={{ display: 'flex', justifyContent: 'center' }}>
+        <SendReminder
+          party={a.party}
+          outstanding={Number(a.bill || 0)}
+          daysOverdue={a.nextFu ? Math.max(0, Math.floor((Date.now() - +new Date(a.nextFu)) / 86400000)) : undefined}
+          owner={data.client?.owner ?? null}
+          execName={a.exec || undefined}
+          onSent={refresh}
+        />
+      </div>
+
       {/* 4 round action buttons */}
       <div style={{
         display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10,
@@ -516,6 +547,15 @@ function AccountTab({
           pill={a.payExpected && new Date(a.payExpected) < new Date() ? { label: 'OVERDUE', tone: 'rust' } : null}
         />
       </Section>
+
+      {/* SETTLEMENT CALCULATOR — quick scenario math for tier C/D/E
+          accounts where partial recovery may be the realistic outcome.
+          Hidden for tier A/B (paying customers, no settlement needed). */}
+      {(a.tier === 'C' || a.tier === 'D' || a.tier === 'E') && Number(a.bill) > 0 && (
+        <Section title="Settlement scenarios">
+          <SettlementCalc outstanding={Number(a.bill)} tier={a.tier} d90p={Number(a.d90p || 0)} />
+        </Section>
+      )}
 
       {/* CREDIT POLICY — inline pencil-edit opens the existing CreditModal */}
       <Section
@@ -782,7 +822,7 @@ function Section({ title, action, children }: { title: string; action?: React.Re
   );
 }
 
-function KV({ label, value, pill }: { label: string; value: string; pill?: { label: string; tone: 'rust' | 'amber' | 'sage' } | null }) {
+function KV({ label, value, pill }: { label: string; value: React.ReactNode; pill?: { label: string; tone: 'rust' | 'amber' | 'sage' } | null }) {
   const pillColor = pill ? (pill.tone === 'rust' ? 'var(--rust)' : pill.tone === 'amber' ? 'var(--amber)' : 'var(--sage)') : null;
   return (
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 13 }}>
@@ -882,12 +922,25 @@ function NextActionLine({ account }: { account: any }) {
 // the RefreshLog audit trail instead, where they belong.
 function TimelineTab({ data }: { data: DrawerData }) {
   const userHistory = data.history.filter(h => (h.source || 'Portal') !== 'Refresh');
-  if (userHistory.length === 0) {
-    return <Empty label="No timeline entries yet. Log a call or add a promise to start." />;
-  }
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+      <CommentsThread party={data.account.party} />
+      <div>
+        <div style={{ fontSize: 11, letterSpacing: '.22em', textTransform: 'uppercase', color: 'var(--ink-soft, #475569)', fontWeight: 700, marginBottom: 10 }}>
+          Activity
+        </div>
+        {userHistory.length === 0
+          ? <Empty label="No activity yet. Log a call or add a promise to start." />
+          : <TimelineList items={userHistory} />}
+      </div>
+    </div>
+  );
+}
+
+function TimelineList({ items }: { items: any[] }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-      {userHistory.map(h => (
+      {items.map(h => (
         <div key={h.id} style={{
           padding: 14, borderRadius: 10, border: '1px solid var(--line, #e7eaf0)',
           background: '#fff',
@@ -911,9 +964,127 @@ function TimelineTab({ data }: { data: DrawerData }) {
   );
 }
 
+// ─── Comments thread (Timeline tab) ──────────────────────────
+// Linear thread per party. Posting a comment with @name creates a
+// Notification row for the @-mentioned user.
+function CommentsThread({ party }: { party: string }) {
+  const [rows, setRows] = useState<Array<{ id: string; ts: string; userName: string; body: string; mentions: string[] }> | null>(null);
+  const [text, setText] = useState('');
+  const [posting, setPosting] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function load() {
+    try {
+      const r = await fetch(`/api/comments/${encodeURIComponent(party)}`).then(x => x.json());
+      if (r?.ok) setRows(r.rows);
+    } catch {/* */}
+  }
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [party]);
+
+  async function post() {
+    if (!text.trim() || posting) return;
+    setPosting(true); setErr(null);
+    try {
+      const r = await fetch(`/api/comments/${encodeURIComponent(party)}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: text.trim() }),
+      }).then(x => x.json());
+      if (!r?.ok) throw new Error(r?.error || 'Failed');
+      setText('');
+      load();
+    } catch (e: any) {
+      setErr(e.message);
+    } finally { setPosting(false); }
+  }
+
+  return (
+    <div>
+      <div style={{ fontSize: 11, letterSpacing: '.22em', textTransform: 'uppercase', color: 'var(--ink-soft, #475569)', fontWeight: 700, marginBottom: 10 }}>
+        Comments
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 10 }}>
+        {rows === null && <div style={{ fontSize: 12, color: 'var(--ink-soft)', fontStyle: 'italic' }}>Loading…</div>}
+        {rows && rows.length === 0 && <div style={{ fontSize: 12, color: 'var(--ink-soft)', fontStyle: 'italic' }}>No comments yet. Use @name to ping someone.</div>}
+        {rows && rows.map(c => (
+          <div key={c.id} style={{
+            background: 'rgba(15,40,85,0.04)', borderRadius: 10,
+            padding: '10px 14px',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 4 }}>
+              <span style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--ink, #0F2855)' }}>{c.userName}</span>
+              <span style={{ fontSize: 10.5, color: 'var(--ink-soft)' }}>{fmtDateTime(c.ts)}</span>
+            </div>
+            <div style={{ fontSize: 13, color: 'var(--ink, #0F2855)', whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>
+              {renderMentions(c.body)}
+            </div>
+          </div>
+        ))}
+      </div>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <textarea
+          value={text}
+          onChange={e => setText(e.target.value)}
+          placeholder="Add a comment… use @name to ping someone"
+          rows={2}
+          style={{
+            flex: 1, padding: '8px 12px', borderRadius: 8,
+            border: '1px solid rgba(15,40,85,0.18)',
+            fontSize: 13, fontFamily: 'inherit', color: 'var(--ink)',
+            outline: 'none', resize: 'vertical', background: '#fff',
+          }}
+        />
+        <button onClick={post} disabled={posting || !text.trim()} style={{
+          padding: '0 16px', borderRadius: 8, cursor: posting || !text.trim() ? 'not-allowed' : 'pointer',
+          background: posting || !text.trim() ? 'rgba(15,40,85,0.25)' : 'linear-gradient(180deg,#1A3F7E,#0F2855)',
+          color: '#fff', border: 'none',
+          fontSize: 11, fontWeight: 700, letterSpacing: '.22em', textTransform: 'uppercase',
+          fontFamily: 'inherit',
+        }}>{posting ? 'Posting…' : 'Post'}</button>
+      </div>
+      {err && <div style={{ marginTop: 6, fontSize: 12, color: 'var(--rust)' }}>{err}</div>}
+    </div>
+  );
+}
+
+function renderMentions(text: string): React.ReactNode {
+  const parts: React.ReactNode[] = [];
+  let last = 0;
+  const re = /@([a-zA-Z][a-zA-Z\s\-]{1,40}?)(?=[\s,.!?]|$)/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) parts.push(text.slice(last, m.index));
+    parts.push(
+      <span key={m.index} style={{
+        color: 'var(--gold-deep, #B58430)', fontWeight: 700,
+      }}>@{m[1].trim()}</span>
+    );
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) parts.push(text.slice(last));
+  return parts;
+}
+
 // ─── Contact tab ─────────────────────────────────────────────
 function ContactTab({ data, onAction }: { data: DrawerData; onAction: (k: ModalKind) => void }) {
   const c = data.client;
+  // Local override map — when the user clicks "Show full" on a
+  // masked field, the reveal endpoint returns the true value and
+  // we cache it here for the duration of the drawer being open.
+  const [revealed, setRevealed] = useState<Record<string, string>>({});
+
+  async function reveal(field: string) {
+    if (!c) return;
+    try {
+      const r = await fetch(`/api/clients/${encodeURIComponent(data.account.party)}/reveal`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ field }),
+      }).then(x => x.json());
+      if (!r?.ok) throw new Error(r?.error || 'Failed');
+      setRevealed(prev => ({ ...prev, [field]: r.value ?? '' }));
+    } catch {/* swallow — masked stays */}
+  }
+
   if (!c) {
     return (
       <div style={{ padding: '32px 16px', textAlign: 'center' }}>
@@ -932,15 +1103,32 @@ function ContactTab({ data, onAction }: { data: DrawerData; onAction: (k: ModalK
       </div>
     );
   }
+
+  const masked = (field: string, displayed: string | null | undefined): React.ReactNode => {
+    const real = revealed[field];
+    if (real) return real;
+    if (!displayed || displayed === '—') return '—';
+    return (
+      <span>
+        <span style={{ fontVariantNumeric: 'tabular-nums' }}>{displayed}</span>
+        <button onClick={() => reveal(field)} style={{
+          marginLeft: 8, background: 'transparent', border: 'none',
+          color: 'var(--gold-deep, #B58430)', cursor: 'pointer',
+          fontSize: 10, fontWeight: 700, letterSpacing: '.18em', textTransform: 'uppercase',
+        }}>Show</button>
+      </span>
+    );
+  };
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <Section title="Contact details" action={
         <button onClick={() => onAction('edit-contact')} style={{ background:'transparent', border:'none', cursor:'pointer', color:'var(--t-3)', padding:4 }} aria-label="Edit"><PencilIcon /></button>
       }>
-        <KV label="Phone"    value={c.phone1 || '—'} />
-        <KV label="Phone 2"  value={c.phone2 || '—'} />
-        <KV label="WhatsApp" value={c.whatsapp || '—'} />
-        <KV label="Email"    value={c.email || '—'} />
+        <KV label="Phone"    value={masked('phone1',   c.phone1)} />
+        <KV label="Phone 2"  value={masked('phone2',   c.phone2)} />
+        <KV label="WhatsApp" value={masked('whatsapp', c.whatsapp)} />
+        <KV label="Email"    value={masked('email',    c.email)} />
       </Section>
       <Section title="Stakeholders">
         <KV label="Owner" value={c.owner || '—'} />
@@ -953,6 +1141,65 @@ function ContactTab({ data, onAction }: { data: DrawerData; onAction: (k: ModalK
           <div style={{ fontSize: 13, color: 'var(--t-2)', whiteSpace: 'pre-wrap' }}>{c.address}</div>
         </Section>
       )}
+    </div>
+  );
+}
+
+// ─── Settlement calculator ────────────────────────────────────
+// Shows three scenarios side-by-side:
+//   1. Pursue full — historic tier-based recovery rate × outstanding
+//   2. Settle now — pick a % of outstanding to accept today
+//   3. Write off  — net loss avoiding further follow-up cost
+// All numbers are estimates — meant as decision-support, not commitment.
+function SettlementCalc({ outstanding, tier, d90p }: { outstanding: number; tier: string; d90p: number }) {
+  // Empirical recovery rates from her industry. Owner can tune later.
+  const RATE: Record<string, number> = { C: 0.75, D: 0.45, E: 0.20 };
+  const recoveryRate = RATE[tier] ?? 0.5;
+  const stuckRatio = outstanding > 0 ? Math.min(1, d90p / outstanding) : 0;
+  // Heavily stuck money has worse recovery odds
+  const adjustedRate = recoveryRate * (1 - 0.4 * stuckRatio);
+  const fullRecovery = outstanding * adjustedRate;
+
+  const [pct, setPct] = useState(60);
+  const settle = outstanding * (pct / 100);
+  const writeOff = -outstanding * 0.15; // assumed admin / opportunity cost
+
+  const best = Math.max(fullRecovery, settle, writeOff);
+  const cell = (label: string, value: number, sub: string, isBest: boolean): React.ReactNode => (
+    <div style={{
+      flex: 1, padding: '12px 14px', borderRadius: 10,
+      background: isBest ? 'rgba(46,108,84,0.10)' : 'rgba(15,40,85,0.04)',
+      border: isBest ? '1px solid rgba(46,108,84,0.32)' : '1px solid transparent',
+    }}>
+      <div style={{ fontSize: 9.5, letterSpacing: '.22em', textTransform: 'uppercase', color: 'var(--t-3)', fontWeight: 700 }}>{label}</div>
+      <div style={{ fontSize: 17, fontWeight: 700, color: isBest ? 'var(--sage, #2E6C54)' : 'var(--ink, #0F2855)', marginTop: 6, fontVariantNumeric: 'tabular-nums' }}>
+        {value < 0 ? '−' : ''}{fmtINR(Math.abs(value))}
+      </div>
+      <div style={{ fontSize: 11, color: 'var(--ink-soft)', marginTop: 4 }}>{sub}</div>
+    </div>
+  );
+
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: 10, marginBottom: 14 }}>
+        {cell('Pursue full', fullRecovery, `${Math.round(adjustedRate * 100)}% historic recovery (tier ${tier})`, best === fullRecovery)}
+        {cell(`Settle at ${pct}%`, settle, 'Accept partial today',                                                  best === settle)}
+        {cell('Write off',  writeOff,    'Stop pursuing — admin cost only',                                        best === writeOff)}
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, fontSize: 12, color: 'var(--ink-soft)' }}>
+        <label style={{ minWidth: 100 }}>Settle at: <b style={{ color: 'var(--ink)' }}>{pct}%</b></label>
+        <input
+          type="range" min={10} max={95} step={5} value={pct}
+          onChange={(e) => setPct(Number(e.target.value))}
+          style={{ flex: 1 }}
+        />
+        <span style={{ minWidth: 100, textAlign: 'right', color: 'var(--ink)', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
+          = {fmtINR(settle)}
+        </span>
+      </div>
+      <div style={{ marginTop: 10, fontSize: 11, color: 'var(--ink-soft)', fontStyle: 'italic' }}>
+        Estimates only. Adjustment factor: −{Math.round(stuckRatio * 40)}% for 90+ stuck ratio.
+      </div>
     </div>
   );
 }
