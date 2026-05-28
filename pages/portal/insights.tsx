@@ -50,10 +50,18 @@ type Insights = {
   holds: { active_count: number; candidate_count: number; active_value: string | number; candidate_value: string | number };
 };
 
+type Snapshot = {
+  id: string; ts: string; byWhom: string;
+  accountCount: number; total: number;
+  d30: number; d60: number; d90: number; d90p: number;
+  activeHolds: number; candidates: number;
+};
+
 export default function InsightsPage() {
   const [data, setData] = useState<Insights | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
+  const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
 
   useEffect(() => {
     fetch('/api/insights')
@@ -63,6 +71,10 @@ export default function InsightsPage() {
         setData(r.data);
       })
       .catch(e => setError(e.message));
+    fetch('/api/insights/aging-trend')
+      .then(r => r.json())
+      .then(r => { if (r?.ok) setSnapshots(r.snapshots || []); })
+      .catch(() => {});
   }, []);
 
   if (error) return <AppShell title="Insights" crumb="Insights"><div style={{ padding: 16, color: 'var(--rust)' }}>Failed: {error}</div></AppShell>;
@@ -131,6 +143,11 @@ export default function InsightsPage() {
         <Kpi label="Active holds" value={String(data.holds.active_count)} hint={fmtINR(Number(data.holds.active_value))} color="rust" />
         <Kpi label="At risk (D/E)" value={fmtINR(Number(s.critical_value))} mono color="amber" hint={`${s.critical_count} accounts · ${Math.round(Number(s.critical_value) / totalBook * 100) || 0}% of book`} />
       </div>
+
+      {/* AGING TREND — RefreshSnapshot time-series. Each datapoint is
+          one refresh; the >90d bucket is highlighted as the primary
+          watch line (74% of total outstanding is stuck in 90+). */}
+      <AgingTrendChart snapshots={snapshots} />
 
       {/* LEADERBOARD (recovery focus) */}
       <Card>
@@ -499,6 +516,131 @@ function PromiseDonut({ open, kept, broken, cancelled }: { open: number; kept: n
           PROMISES
         </text>
       </svg>
+    </div>
+  );
+}
+
+// ─── Aging trend chart ──────────────────────────────────────
+// SVG line chart of aging buckets over time. The >90d series is
+// shown thicker and uses the rust colour because that's the bucket
+// that matters most — when it grows, your collection effort is
+// losing ground.
+function AgingTrendChart({ snapshots }: { snapshots: Snapshot[] }) {
+  if (snapshots.length === 0) {
+    return (
+      <div style={{
+        padding: '18px 22px', marginTop: 16,
+        background: 'var(--bg-1, #fff)', border: '1px solid var(--line, #e7eaf0)',
+        borderRadius: 12,
+      }}>
+        <div style={{
+          fontSize: 11, letterSpacing: '.22em', textTransform: 'uppercase',
+          color: 'var(--t-3)', fontWeight: 700, marginBottom: 8,
+        }}>Aging trend</div>
+        <div style={{ fontSize: 13, color: 'var(--t-3)', fontStyle: 'italic' }}>
+          No snapshots yet — the chart builds up as you upload weekly refreshes.
+        </div>
+      </div>
+    );
+  }
+  // Pick the most recent 26 (≈ 6 months of weekly refreshes) so the chart isn't crowded.
+  const data = snapshots.slice(-26);
+  const W = 760, H = 200, padL = 60, padR = 16, padT = 14, padB = 32;
+  const innerW = W - padL - padR;
+  const innerH = H - padT - padB;
+  const maxY = Math.max(1, ...data.map(s => Math.max(s.total, s.d90p, s.d90 + s.d90p)));
+  const x = (i: number) => padL + (data.length === 1 ? innerW / 2 : (i * innerW) / (data.length - 1));
+  const y = (v: number) => padT + innerH - (v / maxY) * innerH;
+  const line = (vals: number[]) => vals.map((v, i) => `${i === 0 ? 'M' : 'L'}${x(i)},${y(v)}`).join(' ');
+  const fmt = (n: number) => n >= 10_000_000 ? `₹${(n/10_000_000).toFixed(1)} cr`
+                            : n >= 100_000     ? `₹${(n/100_000).toFixed(1)} L`
+                            : `₹${Math.round(n/1000)} k`;
+
+  // Y-axis ticks at 0 / 25 / 50 / 75 / 100% of maxY
+  const ticks = [0, 0.25, 0.5, 0.75, 1].map(f => f * maxY);
+
+  // Movement summary for the headline
+  const first = data[0], last = data[data.length - 1];
+  const d90pDelta = last.d90p - first.d90p;
+  const d90pDeltaPct = first.d90p > 0 ? Math.round((d90pDelta / first.d90p) * 100) : null;
+
+  const series: Array<{ key: keyof Pick<Snapshot,'total'|'d30'|'d60'|'d90'|'d90p'>; label: string; color: string; thick?: boolean }> = [
+    { key: 'total', label: 'Total',  color: 'var(--navy-deep, #0F2855)', thick: false },
+    { key: 'd30',   label: '0-30',   color: 'var(--sage, #2E6C54)' },
+    { key: 'd60',   label: '31-60',  color: 'var(--amber, #C9A472)' },
+    { key: 'd90',   label: '61-90',  color: '#D97757' },
+    { key: 'd90p',  label: '90+',    color: 'var(--rust, #B5483D)', thick: true },
+  ];
+
+  return (
+    <div style={{
+      padding: '18px 22px', marginTop: 16,
+      background: 'var(--bg-1, #fff)', border: '1px solid var(--line, #e7eaf0)',
+      borderRadius: 12,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, marginBottom: 10, flexWrap: 'wrap' }}>
+        <div style={{
+          fontSize: 11, letterSpacing: '.22em', textTransform: 'uppercase',
+          color: 'var(--t-3)', fontWeight: 700,
+        }}>Aging trend</div>
+        <div style={{ fontSize: 12.5, color: 'var(--t-3)' }}>
+          {data.length} snapshot{data.length === 1 ? '' : 's'} · 90+ bucket is the watch line
+        </div>
+        {d90pDeltaPct != null && (
+          <div style={{
+            marginLeft: 'auto', fontSize: 12.5, fontWeight: 700,
+            color: d90pDelta > 0 ? 'var(--rust, #B5483D)' : 'var(--sage, #2E6C54)',
+          }}>
+            90+: {d90pDelta > 0 ? '↑' : '↓'} {Math.abs(d90pDeltaPct)}% over period
+          </div>
+        )}
+      </div>
+      <div style={{ overflowX: 'auto' }}>
+        <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', minWidth: 480, height: H, display: 'block' }}>
+          {/* Y grid + labels */}
+          {ticks.map((v, i) => (
+            <g key={i}>
+              <line x1={padL} x2={W - padR} y1={y(v)} y2={y(v)} stroke="rgba(15,40,85,0.08)" strokeWidth={1} />
+              <text x={padL - 8} y={y(v) + 3} textAnchor="end" fontSize="9.5" fill="var(--t-3)" fontFamily="inherit">{fmt(v)}</text>
+            </g>
+          ))}
+          {/* X labels */}
+          {data.map((s, i) => {
+            // Only show every Nth label to avoid crowding
+            const stride = Math.max(1, Math.floor(data.length / 6));
+            if (i % stride !== 0 && i !== data.length - 1) return null;
+            return (
+              <text key={i} x={x(i)} y={H - padB + 16} textAnchor="middle" fontSize="9" fill="var(--t-3)">
+                {new Date(s.ts).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
+              </text>
+            );
+          })}
+          {/* Lines */}
+          {series.map(s => {
+            const path = line(data.map(d => d[s.key]));
+            return (
+              <g key={s.key}>
+                <path d={path} fill="none" stroke={s.color} strokeWidth={s.thick ? 2.4 : 1.4}
+                      strokeLinecap="round" strokeLinejoin="round"
+                      opacity={s.thick ? 1 : 0.85} />
+                {/* Endpoint dot for the >90 series */}
+                {s.thick && data.length > 0 && (
+                  <circle cx={x(data.length - 1)} cy={y(data[data.length - 1][s.key])} r={4} fill={s.color} />
+                )}
+              </g>
+            );
+          })}
+        </svg>
+      </div>
+      {/* Legend */}
+      <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginTop: 6 }}>
+        {series.map(s => (
+          <div key={s.key} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: 'var(--t-2)' }}>
+            <span style={{ width: 14, height: s.thick ? 3 : 2, background: s.color, borderRadius: 2 }} />
+            <span style={{ fontWeight: s.thick ? 700 : 500 }}>{s.label}</span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

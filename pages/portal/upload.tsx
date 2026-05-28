@@ -14,7 +14,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { AppShell } from '../../components/AppShell';
 
-type Slot = 'agewise' | 'familywise' | 'clientwise';
+type Slot = 'agewise' | 'familywise' | 'clientwise' | 'customermaster';
 
 type SlotMeta = {
   key: Slot;
@@ -40,6 +40,11 @@ const SLOTS: SlotMeta[] = [
     title: 'Collectionwise Report', subtitle: 'Maps party → executive',
     icon: <ClientwiseIcon />,
   },
+  {
+    key: 'customermaster', field: 'file_customermaster',
+    title: 'Customer Master', subtitle: 'Phones, emails, credit limits',
+    icon: <CustomerMasterIcon />,
+  },
 ];
 
 const fmtINR = (n: number) => `₹${Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
@@ -51,6 +56,7 @@ type DoneSummary = {
   agewise: any | null;
   familywise: any | null;
   clientwise: any | null;
+  customermaster: any | null;
   elapsedMs: number;
 };
 
@@ -284,7 +290,7 @@ function PickerCard({
 
 // ─── After-refresh card ─────────────────────────────────────
 function DoneCard({ summary }: { summary: DoneSummary }) {
-  const a = summary.agewise; const f = summary.familywise; const c = summary.clientwise;
+  const a = summary.agewise; const f = summary.familywise; const c = summary.clientwise; const m = summary.customermaster;
   return (
     <div style={{
       marginTop: 4, marginBottom: 4, padding: 22, borderRadius: 14,
@@ -332,6 +338,17 @@ function DoneCard({ summary }: { summary: DoneSummary }) {
             <Row label="Exec reassigned"   v={String(c.updateCount)} accent="sage" />
             <Row label="Accounts created"  v={String(c.createCount)} />
             <Row label="No change"         v={String(c.unchanged)} />
+          </DoneCol>
+        )}
+        {m && (
+          <DoneCol title="Customer Master">
+            <Row label="Rows in file"      v={String(m.fileRows)} />
+            <Row label="Contacts added"    v={String(m.createCount)} accent="sage" />
+            <Row label="Contacts updated"  v={String(m.updateCount)} />
+            <Row label="No change"         v={String(m.unchanged)} />
+            <Row label="With phone"        v={String(m.withPhone)} />
+            <Row label="With email"        v={String(m.withEmail)} />
+            {m.noAccount > 0 && <Row label="No matching account" v={String(m.noAccount)} accent="rust" />}
           </DoneCol>
         )}
       </div>
@@ -399,6 +416,16 @@ function CheckIcon() {
     <svg viewBox="0 0 64 64" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" width="100%" height="100%">
       <circle cx="32" cy="32" r="26" fill="rgba(46,108,84,0.12)" />
       <path d="M20 33 L29 42 L46 24" />
+    </svg>
+  );
+}
+function CustomerMasterIcon() {
+  return (
+    <svg viewBox="0 0 64 64" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" width="100%" height="100%">
+      <rect x="10" y="14" width="44" height="38" rx="4" fill="rgba(201,164,114,0.20)" />
+      <circle cx="22" cy="26" r="4" fill="rgba(15,40,85,0.18)" />
+      <path d="M14 42 c0-4 4-7 8-7 s8 3 8 7" />
+      <path d="M34 24 L50 24 M34 30 L50 30 M34 36 L46 36" />
     </svg>
   );
 }

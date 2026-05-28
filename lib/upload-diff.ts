@@ -25,7 +25,7 @@
 // endpoints can ship a tiny preview to the browser and replay the
 // plan inside one withTransaction on commit.
 // ============================================================
-import type { ParsedAgewise, ParsedClientwise, ParsedFamilywise } from './upload-parser';
+import type { ParsedAgewise, ParsedClientwise, ParsedFamilywise, ParsedCustomerMaster } from './upload-parser';
 
 const FMT = (n: number) => `₹${Number(n || 0).toLocaleString('en-IN')}`;
 
@@ -50,6 +50,20 @@ export type OpenPromise = {
   id: string;
   party: string;
   outstandingAt: number;
+};
+
+export type CurrentClient = {
+  party: string;
+  phone1: string | null;
+  phone2: string | null;
+  whatsapp: string | null;
+  email: string | null;
+  owner: string | null;
+  address: string | null;
+  creditLimit: number;
+  creditTerms: number;
+  vip: string | null;
+  segment: string | null;
 };
 
 // ─── AGEWISE plan ──────────────────────────────────────────────
@@ -319,6 +333,74 @@ export function buildFamilywisePlan(
       updateCount: toUpdate.length,
       unchanged,
       ungrouped: ungrouped.length,
+    },
+  };
+}
+
+// ─── CUSTOMER MASTER plan (ClientMaster contact upserts) ──────
+export type CustomerMasterPlan = {
+  type: 'customermaster';
+  toCreate: ParsedCustomerMaster[];
+  toUpdate: Array<{ party: string; before: CurrentClient; after: ParsedCustomerMaster; changes: string[] }>;
+  unchanged: number;
+  noAccount: Array<{ party: string }>;
+  summary: {
+    fileRows: number;
+    currentClients: number;
+    createCount: number;
+    updateCount: number;
+    unchanged: number;
+    noAccount: number;
+    withPhone: number;
+    withEmail: number;
+  };
+};
+
+export function buildCustomerMasterPlan(
+  parsed: ParsedCustomerMaster[],
+  currentClients: CurrentClient[],
+  accountParties: Set<string>,
+): CustomerMasterPlan {
+  const byParty = new Map<string, CurrentClient>();
+  currentClients.forEach(c => byParty.set(c.party.toUpperCase(), c));
+
+  const toCreate: ParsedCustomerMaster[] = [];
+  const toUpdate: CustomerMasterPlan['toUpdate'] = [];
+  const noAccount: CustomerMasterPlan['noAccount'] = [];
+  let unchanged = 0;
+  let withPhone = 0, withEmail = 0;
+
+  for (const p of parsed) {
+    if (p.phone1 || p.phone2 || p.whatsapp) withPhone++;
+    if (p.email) withEmail++;
+    if (!accountParties.has(p.party.toUpperCase())) noAccount.push({ party: p.party });
+
+    const cur = byParty.get(p.party.toUpperCase());
+    if (!cur) { toCreate.push(p); continue; }
+
+    const changes: string[] = [];
+    if (p.phone1   && p.phone1   !== cur.phone1)   changes.push(`Phone ${cur.phone1 ?? '—'} → ${p.phone1}`);
+    if (p.phone2   && p.phone2   !== cur.phone2)   changes.push(`Phone 2 ${cur.phone2 ?? '—'} → ${p.phone2}`);
+    if (p.whatsapp && p.whatsapp !== cur.whatsapp) changes.push(`WhatsApp ${cur.whatsapp ?? '—'} → ${p.whatsapp}`);
+    if (p.email    && p.email    !== cur.email)    changes.push(`Email ${cur.email ?? '—'} → ${p.email}`);
+    if (p.owner    && p.owner    !== cur.owner)    changes.push(`Owner ${cur.owner ?? '—'} → ${p.owner}`);
+    if (p.address  && p.address  !== cur.address)  changes.push('Address updated');
+    if (p.creditLimit > 0 && p.creditLimit !== cur.creditLimit) changes.push(`Credit limit ₹${cur.creditLimit.toLocaleString('en-IN')} → ₹${p.creditLimit.toLocaleString('en-IN')}`);
+    if (p.creditTerms > 0 && p.creditTerms !== cur.creditTerms) changes.push(`Credit terms ${cur.creditTerms}d → ${p.creditTerms}d`);
+    if (p.vip      && p.vip      !== cur.vip)      changes.push(`VIP ${cur.vip ?? '—'} → ${p.vip}`);
+    if (p.segment  && p.segment  !== cur.segment)  changes.push(`Segment ${cur.segment ?? '—'} → ${p.segment}`);
+
+    if (changes.length > 0) toUpdate.push({ party: cur.party, before: cur, after: p, changes });
+    else unchanged++;
+  }
+
+  return {
+    type: 'customermaster',
+    toCreate, toUpdate, unchanged, noAccount,
+    summary: {
+      fileRows: parsed.length, currentClients: currentClients.length,
+      createCount: toCreate.length, updateCount: toUpdate.length,
+      unchanged, noAccount: noAccount.length, withPhone, withEmail,
     },
   };
 }

@@ -15,13 +15,13 @@ import { query } from '@/lib/pg';
 import { readUploadedFile, readFieldString } from '@/lib/upload-multipart';
 import { parseFinBook, type ReportType } from '@/lib/upload-parser';
 import {
-  buildAgewisePlan, buildClientwisePlan, buildFamilywisePlan,
-  type CurrentAccount, type OpenPromise,
+  buildAgewisePlan, buildClientwisePlan, buildFamilywisePlan, buildCustomerMasterPlan,
+  type CurrentAccount, type OpenPromise, type CurrentClient,
 } from '@/lib/upload-diff';
 
 export const config = { api: { bodyParser: false } };
 
-const VALID: ReportType[] = ['agewise', 'clientwise', 'familywise'];
+const VALID: ReportType[] = ['agewise', 'clientwise', 'familywise', 'customermaster'];
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'Method not allowed' });
@@ -103,20 +103,50 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     });
   }
 
-  // familywise
-  const plan = buildFamilywisePlan(parsed.rows, current);
-  audit(req, user, 'UPLOAD_PREVIEW_FAMILYWISE', file.fileName, { rows: parsed.rows.length, summary: plan.summary });
+  if (parsed.type === 'familywise') {
+    const plan = buildFamilywisePlan(parsed.rows, current);
+    audit(req, user, 'UPLOAD_PREVIEW_FAMILYWISE', file.fileName, { rows: parsed.rows.length, summary: plan.summary });
+    return res.json({
+      ok: true, reportType: 'familywise',
+      file: { name: file.fileName, size: file.size },
+      sheetName: parsed.sheetName, headers: parsed.headers,
+      grandTotal: parsed.grandTotal, warnings: parsed.warnings,
+      emptyFamilies: parsed.emptyFamilies,
+      summary: plan.summary,
+      sample: {
+        creates:  plan.toCreate.slice(0, 25),
+        updates:  plan.toUpdate.slice(0, 25),
+        ungrouped: plan.ungroupedRows.slice(0, 25),
+      },
+    });
+  }
+
+  // customermaster
+  const currentClients = await query<CurrentClient>(
+    `SELECT party, phone1, phone2, whatsapp, email, owner, address,
+            COALESCE("creditLimit",0)::float8 AS "creditLimit",
+            COALESCE("creditTerms",0)::int AS "creditTerms",
+            vip, segment
+       FROM "ClientMaster"`
+  );
+  const accountParties = new Set(current.map(c => c.party.toUpperCase()));
+  const plan = buildCustomerMasterPlan(parsed.rows, currentClients, accountParties);
+  audit(req, user, 'UPLOAD_PREVIEW_CUSTOMERMASTER', file.fileName, { rows: parsed.rows.length, summary: plan.summary });
   return res.json({
-    ok: true, reportType: 'familywise',
+    ok: true, reportType: 'customermaster',
     file: { name: file.fileName, size: file.size },
     sheetName: parsed.sheetName, headers: parsed.headers,
     grandTotal: parsed.grandTotal, warnings: parsed.warnings,
-    emptyFamilies: parsed.emptyFamilies,
     summary: plan.summary,
     sample: {
-      creates:  plan.toCreate.slice(0, 25),
-      updates:  plan.toUpdate.slice(0, 25),
-      ungrouped: plan.ungroupedRows.slice(0, 25),
+      creates: plan.toCreate.slice(0, 25).map(c => ({
+        party: c.party, phone: c.phone1, email: c.email, owner: c.owner,
+        creditLimit: c.creditLimit, creditTerms: c.creditTerms,
+      })),
+      updates: plan.toUpdate.slice(0, 25).map(u => ({
+        party: u.party, changes: u.changes,
+      })),
+      noAccount: plan.noAccount.slice(0, 25),
     },
   });
 }

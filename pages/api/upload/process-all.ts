@@ -23,16 +23,16 @@ import { query, withTransaction } from '@/lib/pg';
 import { readUploadedFiles } from '@/lib/upload-multipart';
 import { parseFinBook } from '@/lib/upload-parser';
 import {
-  buildAgewisePlan, buildClientwisePlan, buildFamilywisePlan,
-  type CurrentAccount, type OpenPromise,
+  buildAgewisePlan, buildClientwisePlan, buildFamilywisePlan, buildCustomerMasterPlan,
+  type CurrentAccount, type OpenPromise, type CurrentClient,
 } from '@/lib/upload-diff';
 import {
-  applyAgewisePlan, applyClientwisePlan, applyFamilywisePlan,
+  applyAgewisePlan, applyClientwisePlan, applyFamilywisePlan, applyCustomerMasterPlan,
 } from '@/lib/upload-commit';
 
 export const config = { api: { bodyParser: false } };
 
-const FIELDS = ['file_agewise', 'file_familywise', 'file_clientwise'] as const;
+const FIELDS = ['file_agewise', 'file_familywise', 'file_clientwise', 'file_customermaster'] as const;
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'Method not allowed' });
@@ -59,9 +59,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const parsed: Record<string, any> = {};
   for (const fieldName of provided) {
     const type =
-      fieldName === 'file_agewise'    ? 'agewise' :
-      fieldName === 'file_familywise' ? 'familywise' :
-                                        'clientwise';
+      fieldName === 'file_agewise'        ? 'agewise' :
+      fieldName === 'file_familywise'     ? 'familywise' :
+      fieldName === 'file_customermaster' ? 'customermaster' :
+                                            'clientwise';
     const r = parseFinBook(files[fieldName].buffer, type);
     if (!r.ok) {
       return res.status(400).json({
@@ -92,6 +93,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   let agewisePlan: any = null;
   let familywisePlan: any = null;
   let clientwisePlan: any = null;
+  let customerMasterPlan: any = null;
 
   if (parsed.file_agewise) {
     const openPromises = await query<OpenPromise>(
@@ -105,12 +107,45 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (parsed.file_clientwise) {
     clientwisePlan = buildClientwisePlan(parsed.file_clientwise.rows, current);
   }
+  if (parsed.file_customermaster) {
+    const currentClients = await query<CurrentClient>(
+      `SELECT party, phone1, phone2, whatsapp, email, owner, address,
+              COALESCE("creditLimit",0)::float8 AS "creditLimit",
+              COALESCE("creditTerms",0)::int AS "creditTerms",
+              vip, segment
+         FROM "ClientMaster"`
+    );
+    const accountParties = new Set(current.map(c => c.party.toUpperCase()));
+    customerMasterPlan = buildCustomerMasterPlan(parsed.file_customermaster.rows, currentClients, accountParties);
+  }
 
   try {
     await withTransaction(async (q) => {
-      if (agewisePlan)    await applyAgewisePlan   (q, agewisePlan,    { fileName: files.file_agewise.fileName,    userExecId: user.execId });
-      if (familywisePlan) await applyFamilywisePlan(q, familywisePlan, { fileName: files.file_familywise.fileName, userExecId: user.execId });
-      if (clientwisePlan) await applyClientwisePlan(q, clientwisePlan, { fileName: files.file_clientwise.fileName, userExecId: user.execId });
+      if (agewisePlan)        await applyAgewisePlan       (q, agewisePlan,        { fileName: files.file_agewise.fileName,        userExecId: user.execId });
+      if (familywisePlan)     await applyFamilywisePlan    (q, familywisePlan,     { fileName: files.file_familywise.fileName,     userExecId: user.execId });
+      if (clientwisePlan)     await applyClientwisePlan    (q, clientwisePlan,     { fileName: files.file_clientwise.fileName,     userExecId: user.execId });
+      if (customerMasterPlan) await applyCustomerMasterPlan(q, customerMasterPlan, { fileName: files.file_customermaster.fileName, userExecId: user.execId });
+
+      // After all three apply, capture an aging snapshot. The Account
+      // table is now in its final post-refresh state, so SUM(d30) etc.
+      // reflects the refreshed numbers. Used by the Insights aging
+      // trend chart to show the >90d bucket over time.
+      const snapId = `snap_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+      await q(
+        `INSERT INTO "RefreshSnapshot"
+           (id, ts, "byWhom", "accountCount", total, d30, d60, d90, d90p, "activeHolds", "candidates")
+         SELECT $1, NOW(), $2,
+                COUNT(*)::int,
+                COALESCE(SUM(bill),0)::numeric,
+                COALESCE(SUM(d30),0)::numeric,
+                COALESCE(SUM(d60),0)::numeric,
+                COALESCE(SUM(d90),0)::numeric,
+                COALESCE(SUM(d90p),0)::numeric,
+                SUM(CASE WHEN "onHold" = 'Active'    THEN 1 ELSE 0 END)::int,
+                SUM(CASE WHEN "onHold" = 'Candidate' THEN 1 ELSE 0 END)::int
+           FROM "Account"`,
+        [snapId, user.execId]
+      );
     });
   } catch (err: any) {
     console.error('[api/upload/process-all] error', err);
@@ -119,9 +154,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   const elapsedMs = Date.now() - tStart;
   const summary = {
-    agewise:    agewisePlan    ? agewisePlan.summary    : null,
-    familywise: familywisePlan ? familywisePlan.summary : null,
-    clientwise: clientwisePlan ? clientwisePlan.summary : null,
+    agewise:        agewisePlan        ? agewisePlan.summary        : null,
+    familywise:     familywisePlan     ? familywisePlan.summary     : null,
+    clientwise:     clientwisePlan     ? clientwisePlan.summary     : null,
+    customermaster: customerMasterPlan ? customerMasterPlan.summary : null,
     elapsedMs,
   };
   audit(req, user, 'UPLOAD_PROCESS_ALL', provided.join(','), summary);

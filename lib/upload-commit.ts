@@ -372,3 +372,106 @@ export async function applyFamilywisePlan(q: Q, plan: FamilywisePlan, opts: { fi
     ]
   );
 }
+
+// ─── CUSTOMER MASTER ──────────────────────────────────────────
+// Upserts ClientMaster rows from a customer-master refresh. Each
+// new row is INSERTed; existing rows get UPDATEd field-by-field so
+// non-empty incoming values overwrite stale ones (the file is the
+// source of truth) but empty incoming values DON'T wipe whatever
+// data is already there.
+export async function applyCustomerMasterPlan(
+  q: Q,
+  plan: import('./upload-diff').CustomerMasterPlan,
+  opts: { fileName: string; userExecId: string }
+) {
+  const history: Parameters<typeof bulkHistory>[1] = [];
+
+  // 1) CREATE — new ClientMaster rows
+  if (plan.toCreate.length > 0) {
+    await bulkInsert(q, 'ClientMaster', plan.toCreate,
+      [
+        { name: 'id',          type: 'text',    get: () => newId('cm') },
+        { name: 'party',       type: 'text',    get: r => r.party },
+        { name: 'phone1',      type: 'text',    get: r => r.phone1 },
+        { name: 'phone2',      type: 'text',    get: r => r.phone2 },
+        { name: 'whatsapp',    type: 'text',    get: r => r.whatsapp },
+        { name: 'email',       type: 'text',    get: r => r.email },
+        { name: 'owner',       type: 'text',    get: r => r.owner },
+        { name: 'address',     type: 'text',    get: r => r.address },
+        { name: 'creditLimit', type: 'numeric', get: r => r.creditLimit },
+        { name: 'creditTerms', type: 'integer', get: r => r.creditTerms },
+        { name: 'vip',         type: 'text',    get: r => r.vip },
+        { name: 'segment',     type: 'text',    get: r => r.segment },
+        { name: 'notes',       type: 'text',    get: r => r.notes },
+      ],
+      [
+        { name: 'updatedAt', expr: 'NOW()' },
+      ],
+      // If a row gets created for the same party by a parallel pass
+      // (unlikely but defensive), upsert the non-null fields.
+      `ON CONFLICT (party) DO UPDATE SET
+         phone1      = COALESCE(EXCLUDED.phone1,   "ClientMaster".phone1),
+         phone2      = COALESCE(EXCLUDED.phone2,   "ClientMaster".phone2),
+         whatsapp    = COALESCE(EXCLUDED.whatsapp, "ClientMaster".whatsapp),
+         email       = COALESCE(EXCLUDED.email,    "ClientMaster".email),
+         owner       = COALESCE(EXCLUDED.owner,    "ClientMaster".owner),
+         address     = COALESCE(EXCLUDED.address,  "ClientMaster".address),
+         "creditLimit" = GREATEST(EXCLUDED."creditLimit", "ClientMaster"."creditLimit"),
+         "creditTerms" = GREATEST(EXCLUDED."creditTerms", "ClientMaster"."creditTerms"),
+         vip         = COALESCE(EXCLUDED.vip,      "ClientMaster".vip),
+         segment     = COALESCE(EXCLUDED.segment,  "ClientMaster".segment),
+         notes       = COALESCE(EXCLUDED.notes,    "ClientMaster".notes),
+         "updatedAt" = NOW()`
+    );
+    for (const c of plan.toCreate) {
+      history.push({
+        party: c.party, action: 'Contact details added',
+        newValue: `Customer Master upload (${opts.fileName})`,
+      });
+    }
+  }
+
+  // 2) UPDATE existing ClientMaster rows. We do one UPDATE per row
+  // because the SET clause depends on which fields are non-empty —
+  // batching with UNNEST while preserving "don't wipe if empty"
+  // semantics would need a CASE per column. With typically < 500
+  // rows that change, sequential is fast enough.
+  for (const u of plan.toUpdate) {
+    const a = u.after;
+    const sets: string[] = [];
+    const params: any[] = [];
+    let i = 1;
+    if (a.phone1)   { sets.push(`phone1=$${i++}`);      params.push(a.phone1); }
+    if (a.phone2)   { sets.push(`phone2=$${i++}`);      params.push(a.phone2); }
+    if (a.whatsapp) { sets.push(`whatsapp=$${i++}`);    params.push(a.whatsapp); }
+    if (a.email)    { sets.push(`email=$${i++}`);       params.push(a.email); }
+    if (a.owner)    { sets.push(`owner=$${i++}`);       params.push(a.owner); }
+    if (a.address)  { sets.push(`address=$${i++}`);     params.push(a.address); }
+    if (a.creditLimit > 0) { sets.push(`"creditLimit"=$${i++}`); params.push(a.creditLimit); }
+    if (a.creditTerms > 0) { sets.push(`"creditTerms"=$${i++}`); params.push(a.creditTerms); }
+    if (a.vip)      { sets.push(`vip=$${i++}`);         params.push(a.vip); }
+    if (a.segment)  { sets.push(`segment=$${i++}`);     params.push(a.segment); }
+    if (a.notes)    { sets.push(`notes=$${i++}`);       params.push(a.notes); }
+    if (sets.length === 0) continue;
+    sets.push(`"updatedAt"=NOW()`);
+    params.push(u.party);
+    await q(`UPDATE "ClientMaster" SET ${sets.join(', ')} WHERE party=$${i}`, params);
+    history.push({
+      party: u.party, action: 'Contact details refreshed',
+      newValue: u.changes.slice(0, 3).join(' · ') + (u.changes.length > 3 ? ` +${u.changes.length - 3}` : ''),
+    });
+  }
+
+  await bulkHistory(q, history);
+
+  await q(
+    `INSERT INTO "RefreshLog"
+       (id, ts, "byWhom", "accountCount", "totalOutstanding", delta,
+        "promisesKept", "promisesBroken", "newHoldCandidates", "newCollections", notes)
+     VALUES ($1, NOW(), $2, $3, 0, 0, 0, 0, 0, 0, $4)`,
+    [
+      newId('rfr'), opts.userExecId, plan.summary.fileRows,
+      `Customer Master upload: ${opts.fileName} — ${plan.summary.createCount} added, ${plan.summary.updateCount} updated, ${plan.summary.withPhone} with phone, ${plan.summary.withEmail} with email`,
+    ]
+  );
+}

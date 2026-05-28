@@ -54,6 +54,7 @@ const SECTIONS: NavSection[] = [
     roles: ['owner', 'admin'],
     items: [
       { view: 'users-auth', label: 'Users & Authorities', href: '/portal/users-auth', roles: ['owner'], icon: <svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M3 21c0-3.5 2.7-6 6-6s6 2.5 6 6"/><circle cx="17.5" cy="9.5" r="2.5"/></svg> },
+      { view: 'bulk-cm',    label: 'Bulk CM Assignment',  href: '/portal/bulk-cm',    roles: ['owner','admin'], icon: <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M20 8v6M23 11h-6"/></svg> },
       { view: 'settings',   label: 'Settings',            href: '/portal/settings',   roles: ['owner','admin'], icon: <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 1 1-14 0 7 7 0 0 1 14 0z"/></svg> },
     ],
   },

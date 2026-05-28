@@ -14,14 +14,16 @@ import { query, withTransaction } from '@/lib/pg';
 import { readUploadedFile, readFieldString } from '@/lib/upload-multipart';
 import { parseFinBook, type ReportType } from '@/lib/upload-parser';
 import {
-  buildAgewisePlan, buildClientwisePlan, buildFamilywisePlan,
-  type CurrentAccount, type OpenPromise,
+  buildAgewisePlan, buildClientwisePlan, buildFamilywisePlan, buildCustomerMasterPlan,
+  type CurrentAccount, type OpenPromise, type CurrentClient,
 } from '@/lib/upload-diff';
-import { applyAgewisePlan, applyClientwisePlan, applyFamilywisePlan } from '@/lib/upload-commit';
+import {
+  applyAgewisePlan, applyClientwisePlan, applyFamilywisePlan, applyCustomerMasterPlan,
+} from '@/lib/upload-commit';
 
 export const config = { api: { bodyParser: false } };
 
-const VALID: ReportType[] = ['agewise', 'clientwise', 'familywise'];
+const VALID: ReportType[] = ['agewise', 'clientwise', 'familywise', 'customermaster'];
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'Method not allowed' });
@@ -74,10 +76,25 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       audit(req, user, 'UPLOAD_COMMIT_CLIENTWISE', file.fileName, plan.summary);
       return res.json({ ok: true, reportType: 'clientwise', summary: plan.summary, file: { name: file.fileName, size: file.size } });
     }
-    const plan = buildFamilywisePlan(parsed.rows, current);
-    await withTransaction(q => applyFamilywisePlan(q, plan, { fileName: file.fileName, userExecId: user.execId }));
-    audit(req, user, 'UPLOAD_COMMIT_FAMILYWISE', file.fileName, plan.summary);
-    return res.json({ ok: true, reportType: 'familywise', summary: plan.summary, file: { name: file.fileName, size: file.size } });
+    if (parsed.type === 'familywise') {
+      const plan = buildFamilywisePlan(parsed.rows, current);
+      await withTransaction(q => applyFamilywisePlan(q, plan, { fileName: file.fileName, userExecId: user.execId }));
+      audit(req, user, 'UPLOAD_COMMIT_FAMILYWISE', file.fileName, plan.summary);
+      return res.json({ ok: true, reportType: 'familywise', summary: plan.summary, file: { name: file.fileName, size: file.size } });
+    }
+    // customermaster
+    const currentClients = await query<CurrentClient>(
+      `SELECT party, phone1, phone2, whatsapp, email, owner, address,
+              COALESCE("creditLimit",0)::float8 AS "creditLimit",
+              COALESCE("creditTerms",0)::int AS "creditTerms",
+              vip, segment
+         FROM "ClientMaster"`
+    );
+    const accountParties = new Set(current.map(c => c.party.toUpperCase()));
+    const plan = buildCustomerMasterPlan(parsed.rows, currentClients, accountParties);
+    await withTransaction(q => applyCustomerMasterPlan(q, plan, { fileName: file.fileName, userExecId: user.execId }));
+    audit(req, user, 'UPLOAD_COMMIT_CUSTOMERMASTER', file.fileName, plan.summary);
+    return res.json({ ok: true, reportType: 'customermaster', summary: plan.summary, file: { name: file.fileName, size: file.size } });
   } catch (err: any) {
     console.error('[api/upload/commit] error', err);
     return res.status(500).json({ ok: false, error: err.message || 'Refresh failed' });

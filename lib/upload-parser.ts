@@ -22,7 +22,7 @@
 // ============================================================
 import * as XLSX from 'xlsx';
 
-export type ReportType = 'agewise' | 'clientwise' | 'familywise';
+export type ReportType = 'agewise' | 'clientwise' | 'familywise' | 'customermaster';
 
 export type ParsedAgewise = {
   party: string;
@@ -49,6 +49,21 @@ export type ParsedFamilywise = {
   balance: number;
 };
 
+export type ParsedCustomerMaster = {
+  party: string;
+  phone1: string | null;
+  phone2: string | null;
+  whatsapp: string | null;
+  email: string | null;
+  owner: string | null;
+  address: string | null;
+  creditLimit: number;
+  creditTerms: number;     // in days
+  vip: 'YES' | 'NO' | null;
+  segment: string | null;
+  notes: string | null;
+};
+
 type CommonOk = {
   ok: true;
   sheetName: string;
@@ -59,9 +74,10 @@ type CommonOk = {
 };
 
 export type ParseResult =
-  | (CommonOk & { type: 'agewise';    rows: ParsedAgewise[] })
-  | (CommonOk & { type: 'clientwise'; rows: ParsedClientwise[]; emptyExecs: string[] })
-  | (CommonOk & { type: 'familywise'; rows: ParsedFamilywise[]; emptyFamilies: string[] })
+  | (CommonOk & { type: 'agewise';        rows: ParsedAgewise[] })
+  | (CommonOk & { type: 'clientwise';     rows: ParsedClientwise[]; emptyExecs: string[] })
+  | (CommonOk & { type: 'familywise';     rows: ParsedFamilywise[]; emptyFamilies: string[] })
+  | (CommonOk & { type: 'customermaster'; rows: ParsedCustomerMaster[] })
   | { ok: false; error: string; headers?: string[]; sheetName?: string; warnings?: string[] };
 
 // ─── Shared helpers ─────────────────────────────────────────────
@@ -351,15 +367,112 @@ function parseFamilywise(grid: any[][], sheetName: string): ParseResult {
   };
 }
 
+// ─── CUSTOMER MASTER — flat contact info ────────────────────────
+// Format assumed for FinBook's Customer Master export. Common header
+// names are detected case-insensitively so the parser works against
+// most accounting-package exports without hand-tuning.
+function parseCustomerMaster(grid: any[][], sheetName: string): ParseResult {
+  const headerRowIdx = findFinBookHeaderRow(grid);
+  if (headerRowIdx < 0) {
+    return { ok: false, error: 'Could not find the "Description" header row in this file. Did you upload the right report?', sheetName };
+  }
+  const headers = (grid[headerRowIdx] || []).map(toStr);
+
+  const cParty   = findCol(headers, 'description', 'party', 'party name', 'customer', 'customer name', 'name', 'ledger', 'ledger name', 'account');
+  const cPhone1  = findCol(headers, 'phone', 'mobile', 'contact', 'contact no', 'phone 1', 'phone1', 'contact no.', 'mobile no', 'mobile no.');
+  const cPhone2  = findCol(headers, 'phone 2', 'phone2', 'alt phone', 'alternate phone', 'secondary phone', 'mobile 2');
+  const cWhats   = findCol(headers, 'whatsapp', 'wa', 'whats app', 'whatsapp no');
+  const cEmail   = findCol(headers, 'email', 'email id', 'e-mail', 'mail');
+  const cOwner   = findCol(headers, 'owner', 'contact person', 'proprietor', 'director', 'in charge', 'incharge', 'reference');
+  const cAddr    = findCol(headers, 'address', 'addr', 'location', 'office address');
+  const cLimit   = findCol(headers, 'credit limit', 'limit', 'credit amount');
+  const cTerms   = findCol(headers, 'credit days', 'credit period', 'credit terms', 'terms', 'days', 'period');
+  const cVip     = findCol(headers, 'vip', 'priority');
+  const cSegment = findCol(headers, 'segment', 'category', 'type', 'group');
+  const cNotes   = findCol(headers, 'notes', 'remarks', 'gst', 'gstin', 'pan', 'tax id');
+
+  if (cParty < 0) {
+    return { ok: false, error: 'No party / customer / ledger column found. Please check the file.', headers, sheetName };
+  }
+
+  const warnings: string[] = [];
+  if (cPhone1 < 0 && cEmail < 0 && cOwner < 0) {
+    warnings.push('No phone / email / owner column detected — the file may not be a Customer Master export.');
+  }
+
+  const dataRows = grid.slice(headerRowIdx + 1);
+  const byParty = new Map<string, ParsedCustomerMaster>();
+  const rows: ParsedCustomerMaster[] = [];
+  let rawCount = 0;
+
+  for (const r of dataRows) {
+    rawCount++;
+    if (!Array.isArray(r)) continue;
+    const party = toStr(r[cParty]);
+    if (!party) continue;
+    if (isSubTotalRow(party)) continue;
+
+    const vipRaw = cVip >= 0 ? toStr(r[cVip]).toUpperCase() : '';
+    const vip: 'YES' | 'NO' | null =
+      ['Y', 'YES', 'TRUE', '1', 'VIP'].includes(vipRaw) ? 'YES'
+      : ['N', 'NO', 'FALSE', '0'].includes(vipRaw)      ? 'NO'
+      : null;
+
+    const row: ParsedCustomerMaster = {
+      party,
+      phone1:      cPhone1  >= 0 ? (toStr(r[cPhone1])  || null) : null,
+      phone2:      cPhone2  >= 0 ? (toStr(r[cPhone2])  || null) : null,
+      whatsapp:    cWhats   >= 0 ? (toStr(r[cWhats])   || null) : null,
+      email:       cEmail   >= 0 ? (toStr(r[cEmail])   || null) : null,
+      owner:       cOwner   >= 0 ? (toStr(r[cOwner])   || null) : null,
+      address:     cAddr    >= 0 ? (toStr(r[cAddr])    || null) : null,
+      creditLimit: cLimit   >= 0 ? toNumber(r[cLimit])           : 0,
+      creditTerms: cTerms   >= 0 ? Math.round(toNumber(r[cTerms])) : 0,
+      vip,
+      segment:     cSegment >= 0 ? (toStr(r[cSegment]) || null) : null,
+      notes:       cNotes   >= 0 ? (toStr(r[cNotes])   || null) : null,
+    };
+
+    // Dedup: if a party appears twice, the second occurrence fills
+    // any gaps left empty by the first (so we don't lose data).
+    const key = party.toUpperCase();
+    const ex = byParty.get(key);
+    if (ex) {
+      ex.phone1   = ex.phone1   || row.phone1;
+      ex.phone2   = ex.phone2   || row.phone2;
+      ex.whatsapp = ex.whatsapp || row.whatsapp;
+      ex.email    = ex.email    || row.email;
+      ex.owner    = ex.owner    || row.owner;
+      ex.address  = ex.address  || row.address;
+      ex.creditLimit = Math.max(ex.creditLimit, row.creditLimit);
+      ex.creditTerms = Math.max(ex.creditTerms, row.creditTerms);
+      ex.vip      = ex.vip      || row.vip;
+      ex.segment  = ex.segment  || row.segment;
+      ex.notes    = ex.notes    || row.notes;
+    } else {
+      byParty.set(key, row);
+      rows.push(row);
+    }
+  }
+
+  return {
+    ok: true, type: 'customermaster', sheetName, headers, rows,
+    rawRowCount: rawCount,
+    grandTotal: 0,
+    warnings,
+  };
+}
+
 // ─── Public entry point ─────────────────────────────────────────
 export function parseFinBook(buf: Buffer, reportType: ReportType): ParseResult {
   const loaded = loadGrid(buf);
   if ('error' in loaded) return { ok: false, error: loaded.error };
   const { sheetName, grid } = loaded;
   switch (reportType) {
-    case 'agewise':    return parseAgewise(grid, sheetName);
-    case 'clientwise': return parseClientwise(grid, sheetName);
-    case 'familywise': return parseFamilywise(grid, sheetName);
-    default:           return { ok: false, error: `Unknown report type: ${reportType}` };
+    case 'agewise':        return parseAgewise(grid, sheetName);
+    case 'clientwise':     return parseClientwise(grid, sheetName);
+    case 'familywise':     return parseFamilywise(grid, sheetName);
+    case 'customermaster': return parseCustomerMaster(grid, sheetName);
+    default:               return { ok: false, error: `Unknown report type: ${reportType}` };
   }
 }
