@@ -35,7 +35,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'Method not allowed' });
   const user = await requireAuth(req, res);
   if (!user) return;
-  if (!requireRole(user, res, 'owner', 'admin', 'cm')) return;
+  if (!requireRole(user, res, 'owner', 'admin', 'cm-accounts')) return;
 
   const parsed = Body.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ ok: false, error: 'Bad request', detail: parsed.error.flatten() });

@@ -10,7 +10,7 @@
 import 'dotenv/config';
 import { PrismaClient } from '@prisma/client';
 import { hashPassword } from '../lib/password';
-import type { Role } from '@prisma/client';
+import type { RoleSlug } from '../lib/roles';
 
 // Use a script-local Prisma client wired to DIRECT_URL (bypasses the Supabase
 // pgbouncer pooler, which fights with prepared statements during loops).
@@ -23,7 +23,7 @@ type Seed = {
   execId: string;
   name: string;
   password: string;
-  role: Role;
+  role: RoleSlug;
   badge: string;
   team: string[];
   scoreboard: boolean;
@@ -37,40 +37,40 @@ const USERS: Seed[] = [
   { execId: 'DULU01',     name: 'DULU',       password: 'Dulu@2026',      role: 'admin', badge: 'Admin', team: ['ALL'], scoreboard: true },
   { execId: 'REETA01',    name: 'REETA',      password: 'Reeta@2026',     role: 'admin', badge: 'Admin', team: ['ALL'], scoreboard: true },
   // CMs
-  { execId: 'NIKHIL01',   name: 'NIKHIL',     password: 'Nikhil@2026',    role: 'cm', badge: 'Collection Manager',
+  { execId: 'NIKHIL01',   name: 'NIKHIL',     password: 'Nikhil@2026',    role: 'cm-accounts', badge: 'Collection Manager',
     team: ['NIKHIL','TAPOSHI RAY','SIMANTA'], scoreboard: true },
-  { execId: 'RITA01',     name: 'RITA BHASKARAN', password: 'Rita@2026',  role: 'cm', badge: 'Collection Manager',
+  { execId: 'RITA01',     name: 'RITA BHASKARAN', password: 'Rita@2026',  role: 'cm-accounts', badge: 'Collection Manager',
     team: ['RAHUL','ANUP DEB SIKDAR','DHIREN','KISHOR','RITA BHASKARAN','RUPSHIKHA','TENZIN','ARUP KEOT-JORHAT'], scoreboard: true },
   // Accounts team (CM-level, team grows over time)
-  { execId: 'SASHANK01',  name: 'SASHANK',  password: 'Sashank@2026',  role: 'cm', badge: 'Accounts', team: ['SASHANK'],  scoreboard: false },
-  { execId: 'RAUNAK01',   name: 'RAUNAK',   password: 'Raunak@2026',   role: 'cm', badge: 'Accounts', team: ['RAUNAK'],   scoreboard: false },
-  { execId: 'SENGUPTA01', name: 'SENGUPTA', password: 'Sengupta@2026', role: 'cm', badge: 'Accounts', team: ['SENGUPTA'], scoreboard: false },
-  { execId: 'NIGAR01',    name: 'NIGAR',    password: 'Nigar@2026',    role: 'cm', badge: 'Accounts', team: ['NIGAR'],    scoreboard: false },
-  { execId: 'TILAK01',    name: 'TILAK',    password: 'Tilak@2026',    role: 'cm', badge: 'Accounts', team: ['TILAK'],    scoreboard: false },
+  { execId: 'SASHANK01',  name: 'SASHANK',  password: 'Sashank@2026',  role: 'cm-accounts', badge: 'Accounts', team: ['SASHANK'],  scoreboard: false },
+  { execId: 'RAUNAK01',   name: 'RAUNAK',   password: 'Raunak@2026',   role: 'cm-accounts', badge: 'Accounts', team: ['RAUNAK'],   scoreboard: false },
+  { execId: 'SENGUPTA01', name: 'SENGUPTA', password: 'Sengupta@2026', role: 'cm-accounts', badge: 'Accounts', team: ['SENGUPTA'], scoreboard: false },
+  { execId: 'NIGAR01',    name: 'NIGAR',    password: 'Nigar@2026',    role: 'cm-accounts', badge: 'Accounts', team: ['NIGAR'],    scoreboard: false },
+  { execId: 'TILAK01',    name: 'TILAK',    password: 'Tilak@2026',    role: 'cm-accounts', badge: 'Accounts', team: ['TILAK'],    scoreboard: false },
   // ── Executives (own-accounts-only scope) ──
-  { execId: 'TAPOSHI01',   name: 'TAPOSHI RAY',             password: 'Taposhi@2026',   role: 'exec', badge: 'Executive', team: [], scoreboard: false },
-  { execId: 'SIMANTA01',   name: 'SIMANTA',                 password: 'Simanta@2026',   role: 'exec', badge: 'Executive', team: [], scoreboard: false },
-  { execId: 'RAHUL01',     name: 'RAHUL',                   password: 'Rahul@2026',     role: 'exec', badge: 'Executive', team: [], scoreboard: false },
-  { execId: 'ANUP01',      name: 'ANUP DEB SIKDAR',         password: 'Anup@2026',      role: 'exec', badge: 'Executive', team: [], scoreboard: false },
-  { execId: 'DHIREN01',    name: 'DHIREN',                  password: 'Dhiren@2026',    role: 'exec', badge: 'Executive', team: [], scoreboard: false },
-  { execId: 'KISHOR01',    name: 'KISHOR',                  password: 'Kishor@2026',    role: 'exec', badge: 'Executive', team: [], scoreboard: false },
-  { execId: 'RUPSHIKHA01', name: 'RUPSHIKHA',               password: 'Rupshikha@2026', role: 'exec', badge: 'Executive', team: [], scoreboard: false },
-  { execId: 'TENZIN01',    name: 'TENZIN',                  password: 'Tenzin@2026',    role: 'exec', badge: 'Executive', team: [], scoreboard: false },
-  { execId: 'ARUP01',      name: 'ARUP KEOT-JORHAT',        password: 'Arup@2026',      role: 'exec', badge: 'Executive', team: [], scoreboard: false },
-  { execId: 'ANKITA01',    name: 'ANKITA MUDAI',            password: 'Ankita@2026',    role: 'exec', badge: 'Executive', team: [], scoreboard: false },
-  { execId: 'MILAN01',     name: 'MILAN DAS',               password: 'Milan@2026',     role: 'exec', badge: 'Executive', team: [], scoreboard: false },
-  { execId: 'AMIT01',      name: 'AMIT CHAKRABORTY',        password: 'Amit@2026',      role: 'exec', badge: 'Executive', team: [], scoreboard: false },
-  { execId: 'ANSARI01',    name: 'ANSARI',                  password: 'Ansari@2026',    role: 'exec', badge: 'Executive', team: [], scoreboard: false },
-  { execId: 'BASANT01',    name: 'BASANTJI KHETAN-JORHAT',  password: 'Basant@2026',    role: 'exec', badge: 'Executive', team: [], scoreboard: false },
-  { execId: 'JAYASHREE01', name: 'JAYASHREE HAZARIKA',      password: 'Jayashree@2026', role: 'exec', badge: 'Executive', team: [], scoreboard: false },
-  { execId: 'KOLKATA01',   name: 'KOLKATA OFFICE',          password: 'Kolkata@2026',   role: 'exec', badge: 'Executive', team: [], scoreboard: false },
-  { execId: 'BISHU01',     name: 'BISHU TASHILDER',         password: 'Bishu@2026',     role: 'exec', badge: 'Executive', team: [], scoreboard: false },
-  { execId: 'JAYANTA01',   name: 'JAYANTAA BHATTACHARJEE',  password: 'Jayanta@2026',   role: 'exec', badge: 'Executive', team: [], scoreboard: false },
-  { execId: 'NANDA01',     name: 'NANDA DUTTA MAZUMDER',    password: 'Nanda@2026',     role: 'exec', badge: 'Executive', team: [], scoreboard: false },
-  { execId: 'PRABIR01',    name: 'PRABIR SEN GUPTA',        password: 'Prabir@2026',    role: 'exec', badge: 'Executive', team: [], scoreboard: false },
-  { execId: 'PRAVESH01',   name: 'PRAVESH AGARWAL',         password: 'Pravesh@2026',   role: 'exec', badge: 'Executive', team: [], scoreboard: false },
-  { execId: 'TILOK01',     name: 'TILOK PAUL',              password: 'Tilok@2026',     role: 'exec', badge: 'Executive', team: [], scoreboard: false },
-  { execId: 'VISHESH01',   name: 'VISHESH SIR',             password: 'Vishesh@2026',   role: 'exec', badge: 'Executive', team: [], scoreboard: false },
+  { execId: 'TAPOSHI01',   name: 'TAPOSHI RAY',             password: 'Taposhi@2026',   role: 'domestic-reservations', badge: 'Executive', team: [], scoreboard: false },
+  { execId: 'SIMANTA01',   name: 'SIMANTA',                 password: 'Simanta@2026',   role: 'domestic-reservations', badge: 'Executive', team: [], scoreboard: false },
+  { execId: 'RAHUL01',     name: 'RAHUL',                   password: 'Rahul@2026',     role: 'domestic-reservations', badge: 'Executive', team: [], scoreboard: false },
+  { execId: 'ANUP01',      name: 'ANUP DEB SIKDAR',         password: 'Anup@2026',      role: 'domestic-reservations', badge: 'Executive', team: [], scoreboard: false },
+  { execId: 'DHIREN01',    name: 'DHIREN',                  password: 'Dhiren@2026',    role: 'domestic-reservations', badge: 'Executive', team: [], scoreboard: false },
+  { execId: 'KISHOR01',    name: 'KISHOR',                  password: 'Kishor@2026',    role: 'domestic-reservations', badge: 'Executive', team: [], scoreboard: false },
+  { execId: 'RUPSHIKHA01', name: 'RUPSHIKHA',               password: 'Rupshikha@2026', role: 'domestic-reservations', badge: 'Executive', team: [], scoreboard: false },
+  { execId: 'TENZIN01',    name: 'TENZIN',                  password: 'Tenzin@2026',    role: 'domestic-reservations', badge: 'Executive', team: [], scoreboard: false },
+  { execId: 'ARUP01',      name: 'ARUP KEOT-JORHAT',        password: 'Arup@2026',      role: 'domestic-reservations', badge: 'Executive', team: [], scoreboard: false },
+  { execId: 'ANKITA01',    name: 'ANKITA MUDAI',            password: 'Ankita@2026',    role: 'domestic-reservations', badge: 'Executive', team: [], scoreboard: false },
+  { execId: 'MILAN01',     name: 'MILAN DAS',               password: 'Milan@2026',     role: 'domestic-reservations', badge: 'Executive', team: [], scoreboard: false },
+  { execId: 'AMIT01',      name: 'AMIT CHAKRABORTY',        password: 'Amit@2026',      role: 'domestic-reservations', badge: 'Executive', team: [], scoreboard: false },
+  { execId: 'ANSARI01',    name: 'ANSARI',                  password: 'Ansari@2026',    role: 'domestic-reservations', badge: 'Executive', team: [], scoreboard: false },
+  { execId: 'BASANT01',    name: 'BASANTJI KHETAN-JORHAT',  password: 'Basant@2026',    role: 'domestic-reservations', badge: 'Executive', team: [], scoreboard: false },
+  { execId: 'JAYASHREE01', name: 'JAYASHREE HAZARIKA',      password: 'Jayashree@2026', role: 'domestic-reservations', badge: 'Executive', team: [], scoreboard: false },
+  { execId: 'KOLKATA01',   name: 'KOLKATA OFFICE',          password: 'Kolkata@2026',   role: 'domestic-reservations', badge: 'Executive', team: [], scoreboard: false },
+  { execId: 'BISHU01',     name: 'BISHU TASHILDER',         password: 'Bishu@2026',     role: 'domestic-reservations', badge: 'Executive', team: [], scoreboard: false },
+  { execId: 'JAYANTA01',   name: 'JAYANTAA BHATTACHARJEE',  password: 'Jayanta@2026',   role: 'domestic-reservations', badge: 'Executive', team: [], scoreboard: false },
+  { execId: 'NANDA01',     name: 'NANDA DUTTA MAZUMDER',    password: 'Nanda@2026',     role: 'domestic-reservations', badge: 'Executive', team: [], scoreboard: false },
+  { execId: 'PRABIR01',    name: 'PRABIR SEN GUPTA',        password: 'Prabir@2026',    role: 'domestic-reservations', badge: 'Executive', team: [], scoreboard: false },
+  { execId: 'PRAVESH01',   name: 'PRAVESH AGARWAL',         password: 'Pravesh@2026',   role: 'domestic-reservations', badge: 'Executive', team: [], scoreboard: false },
+  { execId: 'TILOK01',     name: 'TILOK PAUL',              password: 'Tilok@2026',     role: 'domestic-reservations', badge: 'Executive', team: [], scoreboard: false },
+  { execId: 'VISHESH01',   name: 'VISHESH SIR',             password: 'Vishesh@2026',   role: 'domestic-reservations', badge: 'Executive', team: [], scoreboard: false },
 ];
 
 async function main() {

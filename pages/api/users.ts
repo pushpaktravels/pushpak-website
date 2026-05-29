@@ -19,11 +19,14 @@ import { query, queryOne, withTransaction, newId } from '@/lib/pg';
 import { requireAuth, requireRole } from '@/lib/auth';
 import { audit } from '@/lib/audit';
 import { hashPassword } from '@/lib/password';
+import { ROLE_SLUGS, roleBadge } from '@/lib/roles';
+
+const RoleEnum = z.enum(ROLE_SLUGS as [string, ...string[]]);
 
 const Update = z.object({
   id: z.string().min(1),
   name: z.string().min(1).max(80).optional(),
-  role: z.enum(['owner', 'admin', 'cm', 'exec', 'analyst']).optional(),
+  role: RoleEnum.optional(),
   team: z.array(z.string().min(1).max(60)).max(60).optional(),
   active: z.boolean().optional(),
   scoreboard: z.boolean().optional(),
@@ -40,7 +43,7 @@ const PatchBody = z.object({
 const CreateBody = z.object({
   name: z.string().min(1).max(80),
   execId: z.string().min(1).max(40).transform(s => s.toUpperCase().trim()),
-  role: z.enum(['owner', 'admin', 'cm', 'exec', 'analyst']),
+  role: RoleEnum,
   password: z.string().min(8).max(200),
   badge: z.string().max(60).optional(),
   team: z.array(z.string().min(1).max(60)).max(60).optional(),
@@ -64,11 +67,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
          FROM "User"
          ORDER BY
            CASE role
-             WHEN 'owner'   THEN 0
-             WHEN 'admin'   THEN 1
-             WHEN 'cm'      THEN 2
-             WHEN 'exec'    THEN 3
-             WHEN 'analyst' THEN 4
+             WHEN 'owner'                  THEN 0
+             WHEN 'admin'                  THEN 1
+             WHEN 'cm-accounts'            THEN 2
+             WHEN 'accounts'               THEN 3
+             WHEN 'domestic-reservations'  THEN 4
+             WHEN 'domestic-package'       THEN 5
+             WHEN 'international-packages' THEN 6
+             WHEN 'visa'                   THEN 7
+             WHEN 'insights'               THEN 8
+             WHEN 'marketing'              THEN 9
+             WHEN 'hr'                     THEN 10
+             ELSE 99
            END,
            name ASC`,
         []
@@ -98,10 +108,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         `INSERT INTO "User"
           (id, "execId", name, role, "passwordHash", badge, team, scoreboard,
            active, "viewPerms", "viewReadOnly", "updatedAt")
-         VALUES ($1, $2, $3, $4::"Role", $5, $6, $7, $8, true, $9, $10, NOW())`,
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true, $9, $10, NOW())`,
         [
           id, body.execId, body.name, body.role, passwordHash,
-          body.badge || (body.role === 'cm' ? 'Collection Manager' : body.role === 'exec' ? 'Executive' : body.role.charAt(0).toUpperCase() + body.role.slice(1)),
+          body.badge || roleBadge(body.role),
           body.team || [], body.scoreboard ?? false,
           body.viewPerms || [], body.viewReadOnly || [],
         ]
@@ -127,7 +137,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           const params: any[] = [];
           let p = 1;
           if (u.name         !== undefined) { sets.push(`name         = $${p++}`);          params.push(u.name); }
-          if (u.role         !== undefined) { sets.push(`role         = $${p++}::"Role"`); params.push(u.role); }
+          if (u.role         !== undefined) { sets.push(`role         = $${p++}`);          params.push(u.role); }
           if (u.team         !== undefined) { sets.push(`team         = $${p++}`);          params.push(u.team); }
           if (u.active       !== undefined) { sets.push(`active       = $${p++}`);          params.push(u.active); }
           if (u.scoreboard   !== undefined) { sets.push(`scoreboard   = $${p++}`);          params.push(u.scoreboard); }

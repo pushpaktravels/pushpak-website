@@ -20,9 +20,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       `SELECT name, role
          FROM "User"
         WHERE active = true
-          AND role IN ('owner','admin','cm')
+          AND role IN ('owner','admin','cm-accounts')
         ORDER BY
-          CASE role WHEN 'cm' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END,
+          CASE role WHEN 'cm-accounts' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END,
           name`
     );
     return res.json({ ok: true, cms: rows });

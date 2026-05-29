@@ -56,7 +56,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const users = await query<any>(
     `SELECT id, "execId", name, role, email
        FROM "User" WHERE active = true
-         AND role IN ('owner','admin','cm','exec')
+         AND role IN ('owner','admin','cm-accounts','accounts')
          AND email IS NOT NULL AND email <> ''`
   );
 
@@ -111,7 +111,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   `, [yesterday.toISOString(), today.toISOString()]);
   const calledNames = new Set(callsYesterday.map((c: any) => (c.exec || '').toUpperCase()));
   const silentExecs = users
-    .filter(u => u.role === 'exec' || u.role === 'cm')
+    .filter(u => u.role === 'accounts' || u.role === 'cm-accounts')
     .filter(u => !calledNames.has(u.name.toUpperCase()))
     .map(u => u.name);
 

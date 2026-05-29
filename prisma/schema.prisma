@@ -17,21 +17,17 @@ datasource db {
 }
 
 // ─── USERS / AUTH ─────────────────────────────────────────────
-enum Role {
-  owner
-  admin
-  cm
-  exec
-  analyst
-}
+// role is plain text so new departments can be added without a
+// schema migration. The canonical list lives in lib/roles.ts and
+// is enforced at the API boundary via Zod.
 
 model User {
   id             String    @id @default(cuid())
   execId         String    @unique // "VANSHIKA01" etc — what the user types
   name           String // "VANSHIKA"
   passwordHash   String // argon2id
-  role           Role      @default(exec)
-  badge          String    @default("Executive")
+  role           String    @default("accounts")
+  badge          String    @default("Accounts")
   team           String[] // exec names this user can see; empty = own only; ["ALL"] = god view
   active         Boolean   @default(true)
   scoreboard     Boolean   @default(false)

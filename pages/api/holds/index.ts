@@ -35,8 +35,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (!parsed.success) return res.status(400).json({ ok: false, error: 'Bad request', detail: parsed.error.flatten() });
   const { party, reason, status } = parsed.data;
 
-  // Creating an Active hold straight away requires owner/admin/cm
-  if (status === 'Active' && !hasRole(user, 'owner', 'admin', 'cm')) {
+  // Creating an Active hold straight away requires owner/admin/cm-accounts
+  if (status === 'Active' && !hasRole(user, 'owner', 'admin', 'cm-accounts')) {
     return res.status(403).json({ ok: false, error: 'Only Owner/Admin/CM can create an Active hold directly' });
   }
 

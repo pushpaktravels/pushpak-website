@@ -14,8 +14,9 @@ import { useEffect, useMemo, useState } from 'react';
 import { AppShell } from '../../components/AppShell';
 import { useConfirm } from '../../components/ConfirmProvider';
 import { fmtRelative } from '../../lib/fmt';
+import { ROLES, ROLE_SLUGS, roleLabel, type RoleSlug } from '../../lib/roles';
 
-type Role = 'owner' | 'admin' | 'cm' | 'exec' | 'analyst';
+type Role = RoleSlug;
 
 type User = {
   id: string; execId: string; name: string;
@@ -30,35 +31,52 @@ type User = {
 };
 
 // ─── View catalog (mirrors components/Sidebar.tsx SECTIONS) ──
+// Lists which roles see each view by default (when the user has no
+// per-user viewPerms override set). Brand-new roles like visa /
+// marketing / domestic-* have NO default views — the owner grants
+// them via viewPerms.
 const VIEWS: { key: string; label: string; roles: Role[] }[] = [
-  { key: 'dashboard',      label: 'Dashboard',         roles: ['owner','admin','cm','exec','analyst'] },
-  { key: 'worklist',       label: 'My Worklist',       roles: ['owner','admin','cm','exec'] },
-  { key: 'team-worklist',  label: 'Team Worklist',     roles: ['owner','admin','cm'] },
-  { key: 'hold-check',     label: 'Hold Check',        roles: ['owner','admin','cm','exec'] },
-  { key: 'families',       label: 'Clients & Families', roles: ['owner','admin'] },
-  { key: 'promises',       label: 'Promise Ledger',     roles: ['owner','admin','cm','exec'] },
-  { key: 'payment-plans',  label: 'Doubtful Ledger',    roles: ['owner','admin','cm','exec'] },
-  { key: 'legal',          label: 'Legal Ledger',       roles: ['owner','admin','cm','exec','analyst'] },
-  { key: 'collections',    label: 'Collection List',    roles: ['owner','admin','cm','exec','analyst'] },
-  { key: 'upload',         label: 'Upload & Refresh',   roles: ['owner','admin'] },
-  { key: 'performance',    label: 'Performance',        roles: ['owner','admin','cm','exec'] },
-  { key: 'scoreboard',     label: 'Scoreboard',         roles: ['owner','admin','cm'] },
-  { key: 'insights',       label: 'Insights',           roles: ['owner','analyst'] },
-  { key: 'users-auth',     label: 'Users & Authorities', roles: ['owner'] },
-  { key: 'bulk-cm',        label: 'Bulk CM Assignment', roles: ['owner','admin'] },
-  { key: 'audit',          label: 'Audit Log',          roles: ['owner'] },
-  { key: 'permissions',    label: 'Permissions',        roles: ['owner'] },
-  { key: 'activity',       label: 'Activity & Time',    roles: ['owner','admin'] },
-  { key: 'settings',       label: 'Settings',           roles: ['owner','admin'] },
+  { key: 'dashboard',           label: 'Dashboard',          roles: [...ROLE_SLUGS] }, // personal, every user
+  { key: 'profile',             label: 'My Profile',         roles: [...ROLE_SLUGS] }, // personal, every user
+  { key: 'followup-dashboard',  label: 'Followup Dashboard', roles: ['owner','admin','cm-accounts','accounts','insights'] },
+  { key: 'worklist',            label: 'My Worklist',        roles: ['owner','admin','cm-accounts','accounts'] },
+  { key: 'team-worklist',       label: 'Team Worklist',      roles: ['owner','admin','cm-accounts'] },
+  { key: 'hold-check',          label: 'Hold Check',         roles: ['owner','admin','cm-accounts','accounts'] },
+  { key: 'families',            label: 'Clients & Families', roles: ['owner','admin'] },
+  { key: 'promises',            label: 'Promise Ledger',     roles: ['owner','admin','cm-accounts','accounts'] },
+  { key: 'payment-plans',       label: 'Doubtful Ledger',    roles: ['owner','admin','cm-accounts','accounts'] },
+  { key: 'legal',               label: 'Legal Ledger',       roles: ['owner','admin','cm-accounts','accounts','insights'] },
+  { key: 'collections',         label: 'Collection List',    roles: ['owner','admin','cm-accounts','accounts','insights'] },
+  { key: 'upload',              label: 'Upload & Refresh',   roles: ['owner','admin'] },
+  { key: 'performance',         label: 'Performance',        roles: ['owner','admin','cm-accounts','accounts'] },
+  { key: 'scoreboard',          label: 'Scoreboard',         roles: ['owner','admin','cm-accounts'] },
+  { key: 'insights',            label: 'Insights',           roles: ['owner','insights'] },
+  { key: 'attendance',          label: 'Attendance',         roles: ['owner','admin','hr'] },
+  { key: 'employees',           label: 'Employees',          roles: ['owner','admin','hr'] },
+  { key: 'users-auth',          label: 'Users & Authorities', roles: ['owner'] },
+  { key: 'bulk-cm',             label: 'Bulk CM Assignment', roles: ['owner','admin'] },
+  { key: 'audit',               label: 'Audit Log',          roles: ['owner'] },
+  { key: 'permissions',         label: 'Permissions',        roles: ['owner'] },
+  { key: 'activity',            label: 'Activity & Time',    roles: ['owner','admin'] },
+  { key: 'settings',            label: 'Settings',           roles: ['owner','admin'] },
 ];
 
-const ROLE_META: Record<Role, { bg: string; fg: string; label: string }> = {
-  owner:   { bg: 'rgba(217,119,87,.16)',  fg: '#B5483D', label: 'OWNER' },
-  admin:   { bg: 'rgba(217,165,69,.18)',  fg: '#7F6000', label: 'ADMIN' },
-  cm:      { bg: 'rgba(13,71,161,.14)',   fg: '#0D47A1', label: 'CM' },
-  exec:    { bg: 'rgba(46,125,92,.16)',   fg: '#274E13', label: 'EXEC' },
-  analyst: { bg: 'rgba(100,116,139,.18)', fg: '#475569', label: 'ANALYST' },
+// Colour palette for the role chip in the users table. Roles not
+// listed here fall back to a neutral slate.
+const ROLE_META: Record<string, { bg: string; fg: string }> = {
+  owner:                  { bg: 'rgba(217,119,87,.16)',  fg: '#B5483D' },
+  admin:                  { bg: 'rgba(217,165,69,.18)',  fg: '#7F6000' },
+  'cm-accounts':          { bg: 'rgba(13,71,161,.14)',   fg: '#0D47A1' },
+  accounts:               { bg: 'rgba(46,125,92,.16)',   fg: '#274E13' },
+  'domestic-reservations': { bg: 'rgba(72,118,184,.14)', fg: '#1F3D7A' },
+  'domestic-package':     { bg: 'rgba(105,168,219,.14)', fg: '#1D4F7E' },
+  'international-packages': { bg: 'rgba(178,79,55,.12)', fg: '#7F2A1F' },
+  visa:                   { bg: 'rgba(146,98,160,.14)',  fg: '#4A2E61' },
+  insights:               { bg: 'rgba(100,116,139,.18)', fg: '#475569' },
+  marketing:              { bg: 'rgba(217,72,118,.12)',  fg: '#7F2447' },
+  hr:                     { bg: 'rgba(46,108,84,.14)',   fg: '#214F3D' },
 };
+const ROLE_NEUTRAL = { bg: 'rgba(100,116,139,.14)', fg: '#475569' };
 
 function visibleCount(u: User): number {
   if (u.viewPerms && u.viewPerms.length > 0) return u.viewPerms.length;
@@ -163,7 +181,7 @@ export default function UsersAuthPage() {
           </thead>
           <tbody>
             {users.map(u => {
-              const meta = ROLE_META[u.role];
+              const meta = ROLE_META[u.role] || ROLE_NEUTRAL;
               return (
                 <tr key={u.id} style={{
                   borderBottom: '1px solid var(--line, #e7eaf0)',
@@ -179,7 +197,7 @@ export default function UsersAuthPage() {
                       padding: '4px 12px', borderRadius: 5,
                       fontSize: 10.5, fontWeight: 700, letterSpacing: '.16em',
                       textTransform: 'uppercase',
-                    }}>{meta.label}</span>
+                    }}>{roleLabel(u.role)}</span>
                   </Td>
                   <Td align="center">
                     <Toggle on={u.scoreboard} onChange={v => toggleScoreboard(u, v)} disabled={!u.active} />
@@ -227,7 +245,7 @@ function UserEditModal({
 }) {
   const [name, setName] = useState(user?.name || '');
   const [execId, setExecId] = useState(user?.execId || '');
-  const [role, setRole] = useState<Role>(user?.role || 'exec');
+  const [role, setRole] = useState<Role>(user?.role || 'accounts');
   const [password, setPassword] = useState('');
   const [scoreboard, setScoreboard] = useState(user?.scoreboard ?? false);
 
@@ -235,7 +253,7 @@ function UserEditModal({
   // For existing users, hydrate from their stored perms or fall back to role defaults.
   const initialVisible = user?.viewPerms && user.viewPerms.length > 0
     ? new Set(user.viewPerms)
-    : new Set(VIEWS.filter(v => v.roles.includes(user?.role || 'exec')).map(v => v.key));
+    : new Set(VIEWS.filter(v => v.roles.includes(user?.role || 'accounts')).map(v => v.key));
   const initialReadonly = new Set(user?.viewReadOnly || []);
 
   const [visible, setVisible] = useState<Set<string>>(initialVisible);
@@ -327,11 +345,9 @@ function UserEditModal({
             </Field>
             <Field label="Role">
               <select value={role} onChange={e => setRole(e.target.value as Role)} style={inputStyle}>
-                <option value="owner">OWNER</option>
-                <option value="admin">ADMIN</option>
-                <option value="cm">CM</option>
-                <option value="exec">EXEC</option>
-                <option value="analyst">ANALYST</option>
+                {ROLES.map(r => (
+                  <option key={r.slug} value={r.slug}>{r.label}</option>
+                ))}
               </select>
             </Field>
           </div>

@@ -22,7 +22,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (req.method !== 'GET') return res.status(405).json({ ok: false, error: 'Method not allowed' });
   const user = await requireAuth(req, res);
   if (!user) return;
-  if (!requireRole(user, res, 'owner', 'admin', 'analyst')) return;
+  if (!requireRole(user, res, 'owner', 'admin', 'insights')) return;
 
   try {
     const [

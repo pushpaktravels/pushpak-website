@@ -29,7 +29,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const user = await requireAuth(req, res);
   if (!user) return;
 
-  if (!hasRole(user, 'owner', 'admin', 'cm')) {
+  if (!hasRole(user, 'owner', 'admin', 'cm-accounts')) {
     return res.status(403).json({ ok: false, error: 'Only Owner/Admin/CM can change hold status' });
   }
 
