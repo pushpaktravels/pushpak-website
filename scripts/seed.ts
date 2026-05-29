@@ -39,14 +39,17 @@ const USERS: Seed[] = [
   // CMs
   { execId: 'NIKHIL01',   name: 'NIKHIL',     password: 'Nikhil@2026',    role: 'cm-accounts', badge: 'Collection Manager',
     team: ['NIKHIL','TAPOSHI RAY','SIMANTA'], scoreboard: true },
-  { execId: 'RITA01',     name: 'RITA BHASKARAN', password: 'Rita@2026',  role: 'cm-accounts', badge: 'Collection Manager',
+  // Rita is primarily Domestic Reservations but also helps in Followup
+  // (workload low) — her cross-dept Followup access is granted via viewPerms
+  // by scripts/provision-roster-2026-05-29.ts, not by role.
+  { execId: 'RITA01',     name: 'RITA BHASKARAN', password: 'Rita@2026',  role: 'domestic-reservations', badge: 'Domestic Res.',
     team: ['RAHUL','ANUP DEB SIKDAR','DHIREN','KISHOR','RITA BHASKARAN','RUPSHIKHA','TENZIN','ARUP KEOT-JORHAT'], scoreboard: true },
-  // Accounts team (CM-level, team grows over time)
-  { execId: 'SASHANK01',  name: 'SASHANK',  password: 'Sashank@2026',  role: 'cm-accounts', badge: 'Accounts', team: ['SASHANK'],  scoreboard: false },
-  { execId: 'RAUNAK01',   name: 'RAUNAK',   password: 'Raunak@2026',   role: 'cm-accounts', badge: 'Accounts', team: ['RAUNAK'],   scoreboard: false },
-  { execId: 'SENGUPTA01', name: 'SENGUPTA', password: 'Sengupta@2026', role: 'cm-accounts', badge: 'Accounts', team: ['SENGUPTA'], scoreboard: false },
-  { execId: 'NIGAR01',    name: 'NIGAR',    password: 'Nigar@2026',    role: 'cm-accounts', badge: 'Accounts', team: ['NIGAR'],    scoreboard: false },
-  { execId: 'TILAK01',    name: 'TILAK',    password: 'Tilak@2026',    role: 'cm-accounts', badge: 'Accounts', team: ['TILAK'],    scoreboard: false },
+  // Accounts team — Nikhil is the CM (cm-accounts); the rest are accounts staff.
+  { execId: 'SASHANK01',  name: 'SASHANK',  password: 'Sashank@2026',  role: 'accounts',    badge: 'Accounts', team: ['SASHANK'],  scoreboard: false },
+  { execId: 'RAUNAK01',   name: 'RAUNAK',   password: 'Raunak@2026',   role: 'accounts',    badge: 'Accounts', team: ['RAUNAK'],   scoreboard: false },
+  { execId: 'SENGUPTA01', name: 'SENGUPTA', password: 'Sengupta@2026', role: 'admin',       badge: 'Admin',    team: ['ALL'],       scoreboard: true  },
+  { execId: 'NIGAR01',    name: 'NIGAR',    password: 'Nigar@2026',    role: 'accounts',    badge: 'Accounts', team: ['NIGAR'],    scoreboard: false },
+  { execId: 'TILAK01',    name: 'TILAK',    password: 'Tilak@2026',    role: 'accounts',    badge: 'Accounts', team: ['TILAK'],    scoreboard: false },
   // ── Executives (own-accounts-only scope) ──
   { execId: 'TAPOSHI01',   name: 'TAPOSHI RAY',             password: 'Taposhi@2026',   role: 'domestic-reservations', badge: 'Executive', team: [], scoreboard: false },
   { execId: 'SIMANTA01',   name: 'SIMANTA',                 password: 'Simanta@2026',   role: 'domestic-reservations', badge: 'Executive', team: [], scoreboard: false },

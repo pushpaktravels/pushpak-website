@@ -14,6 +14,9 @@
 // 2026-05-29: replaced the old { owner, admin, cm, exec, analyst }
 // enum with department-tagged roles. Existing users migrated:
 // cm → cm-accounts, exec → domestic-reservations, analyst → insights.
+// 2026-05-29 (later): added `support-staff` for non-departmental
+// staff (peons, drivers, front office, field collection, IT). It
+// gets NO default views — they only ever see Dashboard + My Profile.
 // ============================================================
 
 export const ROLES = [
@@ -28,6 +31,7 @@ export const ROLES = [
   { slug: 'insights',               label: 'Insights',              badge: 'Insights' },
   { slug: 'marketing',              label: 'Marketing',             badge: 'Marketing' },
   { slug: 'hr',                     label: 'HR',                    badge: 'HR' },
+  { slug: 'support-staff',          label: 'Support Staff',         badge: 'Support' },
 ] as const;
 
 export type RoleSlug = typeof ROLES[number]['slug'];

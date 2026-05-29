@@ -75,6 +75,7 @@ const ROLE_META: Record<string, { bg: string; fg: string }> = {
   insights:               { bg: 'rgba(100,116,139,.18)', fg: '#475569' },
   marketing:              { bg: 'rgba(217,72,118,.12)',  fg: '#7F2447' },
   hr:                     { bg: 'rgba(46,108,84,.14)',   fg: '#214F3D' },
+  'support-staff':        { bg: 'rgba(120,113,108,.16)', fg: '#57534E' },
 };
 const ROLE_NEUTRAL = { bg: 'rgba(100,116,139,.14)', fg: '#475569' };
 
