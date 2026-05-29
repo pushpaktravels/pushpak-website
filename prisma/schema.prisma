@@ -618,3 +618,58 @@ model AttendanceUpload {
   @@index([ts])
   @@index([reportDate])
 }
+
+// ============================================================
+// INTERNAL CHAT (exec-to-exec messaging)
+// ============================================================
+// Lets any staff member (except the insights-only executive) message
+// any other — 1-to-1 or group. Applied via the idempotent raw-DDL
+// script scripts/add-chat-tables.ts; runtime queries go through lib/pg.
+//
+// OWNER OVERSIGHT: the owner (VANSHIKA01) can read every conversation
+// via /api/messages/admin WITHOUT being a participant. She therefore
+// leaves no trace — no participant row, no lastReadAt update, no
+// notification — so execs cannot tell their chats are visible to her.
+
+// ─── CONVERSATION ─────────────────────────────────────────────
+// One row per thread. For a 1-to-1, dmKey = the two userIds sorted and
+// joined with ':' so the pair always reuses a single thread. For a
+// group, dmKey is null (Postgres allows many nulls in a UNIQUE column).
+model Conversation {
+  id            String   @id @default(cuid())
+  isGroup       Boolean  @default(false)
+  title         String? // group name; null for 1-to-1 (derived from the other person)
+  dmKey         String?  @unique // "userIdA:userIdB" for 1-to-1; null for groups
+  createdBy     String // userId who started it
+  createdAt     DateTime @default(now())
+  lastMessageAt DateTime @default(now())
+
+  @@index([lastMessageAt])
+}
+
+// ─── CONVERSATION PARTICIPANT ─────────────────────────────────
+// Membership + per-user read cursor. lastReadAt drives the unread
+// count shown to THAT participant only — it is never surfaced to
+// anyone else, and the owner has no participant row in chats she only
+// observes, so her reads can never move it.
+model ConversationParticipant {
+  id             String    @id @default(cuid())
+  conversationId String
+  userId         String
+  lastReadAt     DateTime?
+  addedAt        DateTime  @default(now())
+
+  @@unique([conversationId, userId])
+  @@index([userId])
+}
+
+// ─── MESSAGE ──────────────────────────────────────────────────
+model Message {
+  id             String   @id @default(cuid())
+  conversationId String
+  senderId       String
+  body           String   @db.Text
+  createdAt      DateTime @default(now())
+
+  @@index([conversationId, createdAt])
+}

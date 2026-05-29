@@ -13,6 +13,7 @@ type Notif = {
   id: string; ts: string; kind: string;
   title: string; body: string | null;
   party: string | null; accountId: string | null;
+  convId: string | null;
   readAt: string | null;
 };
 
@@ -59,7 +60,8 @@ export function NotificationsBell() {
       body: JSON.stringify({ ids: [n.id] }),
     });
     setOpen(false);
-    if (n.party) router.push(`/portal/worklist`);
+    if (n.kind === 'MESSAGE') router.push(`/portal/messages${n.convId ? `?c=${n.convId}` : ''}`);
+    else if (n.party) router.push(`/portal/worklist`);
     load();
   }
 

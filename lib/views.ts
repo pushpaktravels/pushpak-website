@@ -48,6 +48,10 @@ export const VIEWS: ViewRow[] = [
   // Personal — every role, every user (also bypassed in the Sidebar).
   { key: 'dashboard',           label: 'Dashboard',           roles: [...ROLE_SLUGS] },
   { key: 'profile',             label: 'My Profile',          roles: [...ROLE_SLUGS] },
+  // Internal chat — universal like the personal views (forced-allowed in
+  // canAccessView below), so it is never blocked by a narrow viewPerms list.
+  // The insights-only executive (Vishal) is the sole exception.
+  { key: 'messages',            label: 'Messages',            roles: [...ROLE_SLUGS] },
   // Command Center — the owner's company-wide executive overview
   // (financials + workforce + attendance + team performance). Owners
   // only by default; grantable to others via viewPerms.
@@ -92,13 +96,14 @@ export function canAccessView(user: ViewUser, key: string): boolean {
   // and NEVER get the owner bypass below — even if their row says 'owner'.
   if (user.execId && INSIGHTS_ONLY_EXEC_IDS.has(user.execId)) {
     if (key === 'dashboard' || key === 'profile') return true;  // personal
-    return INSIGHTS_ONLY_VIEWS.has(key);
+    return INSIGHTS_ONLY_VIEWS.has(key);             // 'messages' → false for Vishal
   }
   if (user.role === 'owner') return true;            // root of trust
   const v = VIEW_BY_KEY.get(key);
   if (!v) return false;                              // unknown view → deny
-  // Personal views are never gated — every employee always has them.
-  if (key === 'dashboard' || key === 'profile') return true;
+  // Personal views + chat are never gated — every employee always has them
+  // (the insights-only exception is handled above, before this point).
+  if (key === 'dashboard' || key === 'profile' || key === 'messages') return true;
   // An explicit viewPerms list is authoritative and REPLACES the role
   // defaults (mirrors Sidebar.canSee) so owners can widen AND narrow.
   if (user.viewPerms && user.viewPerms.length > 0) {
@@ -134,8 +139,8 @@ export function canEditView(user: ViewUser, key: string): boolean {
   }
   if (user.role === 'owner') return true;            // root of trust
   if (!canAccessView(user, key)) return false;       // can't see → can't edit
-  // Personal views are always editable by their owner.
-  if (key === 'dashboard' || key === 'profile') return true;
+  // Personal views + chat are always editable (sending a message) by the user.
+  if (key === 'dashboard' || key === 'profile' || key === 'messages') return true;
   // An explicit per-user read-only flag forbids mutations.
   if (user.viewReadOnly && user.viewReadOnly.includes(key)) return false;
   return true;

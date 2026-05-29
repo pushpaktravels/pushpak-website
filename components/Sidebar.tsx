@@ -51,6 +51,7 @@ const SECTIONS: NavSection[] = [
     roles: ['owner', 'admin', 'cm-accounts', 'accounts', 'insights'],
     items: [
       { view: 'dashboard', label: 'Dashboard',  href: '/portal',         roles: ['owner','admin','cm-accounts','accounts','insights'], dept: 'personal', icon: <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg> },
+      { view: 'messages',  label: 'Messages',   href: '/portal/messages', roles: ['owner','admin','cm-accounts','accounts','insights'], dept: 'personal', icon: <svg viewBox="0 0 24 24"><path d="M21 11.5a8.38 8.38 0 0 1-8.5 8.5 8.5 8.5 0 0 1-3.6-.8L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8A8.5 8.5 0 0 1 12.5 3a8.38 8.38 0 0 1 8.5 8.5z"/></svg> },
       { view: 'profile',   label: 'My Profile', href: '/portal/profile', roles: ['owner','admin','cm-accounts','accounts','insights'], dept: 'personal', icon: <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg> },
     ],
   },
@@ -113,6 +114,7 @@ const SECTIONS: NavSection[] = [
       { view: 'users-auth',  label: 'Users & Authorities', href: '/portal/users-auth',  roles: ['owner'],         dept: 'settings', icon: <svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M3 21c0-3.5 2.7-6 6-6s6 2.5 6 6"/><circle cx="17.5" cy="9.5" r="2.5"/></svg> },
       { view: 'permissions', label: 'Permissions',         href: '/portal/permissions', roles: ['owner'],         dept: 'settings', icon: <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></svg> },
       { view: 'audit',       label: 'Audit Log',           href: '/portal/audit',       roles: ['owner'],         dept: 'settings', icon: <svg viewBox="0 0 24 24"><path d="M12 2l3 7h7l-5.5 4 2 7L12 16l-6.5 4 2-7L2 9h7z"/></svg> },
+      { view: 'messages-admin', label: 'Message Oversight', href: '/portal/messages-admin', roles: ['owner'],     dept: 'settings', icon: <svg viewBox="0 0 24 24"><path d="M21 11.5a8.38 8.38 0 0 1-8.5 8.5 8.5 8.5 0 0 1-3.6-.8L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8A8.5 8.5 0 0 1 12.5 3a8.38 8.38 0 0 1 8.5 8.5z"/></svg> },
       { view: 'activity',    label: 'Activity & Time',     href: '/portal/activity',    roles: ['owner','admin'], dept: 'settings', icon: <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg> },
       { view: 'settings',    label: 'Settings',            href: '/portal/settings',    roles: ['owner','admin'], dept: 'settings', icon: <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 1 1-14 0 7 7 0 0 1 14 0z"/></svg> },
     ],
@@ -121,9 +123,16 @@ const SECTIONS: NavSection[] = [
 
 function canSee(item: NavItem, user: CurrentUser): boolean {
   // Personal department is the default landing for every employee —
-  // Dashboard + My Profile are never gated by role overrides or
-  // viewPerms. Every user must always see their own page.
-  if (item.dept === 'personal') return true;
+  // Dashboard + My Profile + Messages are never gated by role overrides
+  // or viewPerms. The one exception: the insights-only executive (Vishal)
+  // is a pure spectator, so he gets Dashboard + Profile but NOT chat —
+  // mirrors lib/views.ts canAccessView.
+  if (item.dept === 'personal') {
+    if (INSIGHTS_ONLY_EXEC_IDS.has(user.execId)) {
+      return item.view === 'dashboard' || item.view === 'profile';
+    }
+    return true;
+  }
 
   // Insights-only identities (e.g. Vishal) see ONLY their pinned views —
   // checked BEFORE the owner bypass so it holds even if their row says

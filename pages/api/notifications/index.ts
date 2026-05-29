@@ -10,7 +10,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   if (req.method === 'GET') {
     const rows = await query<any>(
-      `SELECT id, ts, kind, title, body, party, "accountId", "readAt"
+      `SELECT id, ts, kind, title, body, party, "accountId", "convId", "readAt"
          FROM "Notification"
         WHERE "userId" = $1
         ORDER BY ts DESC
