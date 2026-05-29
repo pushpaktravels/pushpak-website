@@ -21,7 +21,7 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import { z } from 'zod';
 import { query, queryOne, withTransaction, newId } from '@/lib/pg';
 import { requireAuth, visibleExecNames } from '@/lib/auth';
-import { requireView } from '@/lib/views';
+import { requireView, requireViewEdit } from '@/lib/views';
 import { audit } from '@/lib/audit';
 import { fmtINR, fmtDate } from '@/lib/fmt';
 
@@ -42,6 +42,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return handleList(req, res, user);
   }
   if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'Method not allowed' });
+  if (!requireViewEdit(user, res, 'promises')) return;
 
   const parsed = Body.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ ok: false, error: 'Bad request', detail: parsed.error.flatten() });

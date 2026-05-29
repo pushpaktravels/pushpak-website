@@ -5,7 +5,7 @@
 // ============================================================
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { z } from 'zod';
-import { query, queryOne, newId } from '@/lib/pg';
+import { query, queryOne, withTransaction, newId } from '@/lib/pg';
 import { requireAuth } from '@/lib/auth';
 import { requireView } from '@/lib/views';
 
@@ -84,35 +84,38 @@ async function send(user: any, conversationId: string, req: NextApiRequest, res:
   if (!parsed.success) return res.status(400).json({ ok: false, error: 'Message is empty or too long' });
   const body = parsed.data.body;
 
-  const msgId = newId('msg');
-  await query(
-    `INSERT INTO "Message" (id, "conversationId", "senderId", body, "createdAt")
-     VALUES ($1, $2, $3, $4, NOW())`,
-    [msgId, conversationId, user.id, body]
-  );
-  await query(`UPDATE "Conversation" SET "lastMessageAt" = NOW() WHERE id = $1`, [conversationId]);
-  await query(
-    `UPDATE "ConversationParticipant" SET "lastReadAt" = NOW() WHERE "conversationId" = $1 AND "userId" = $2`,
-    [conversationId, user.id]
-  );
-
-  // Notify the OTHER participants (bell badge). Group → include the thread
-  // title so they know where it landed.
   const conv = await queryOne<any>(`SELECT "isGroup", title FROM "Conversation" WHERE id = $1`, [conversationId]);
-  const others = await query<any>(
-    `SELECT "userId" FROM "ConversationParticipant" WHERE "conversationId" = $1 AND "userId" <> $2`,
-    [conversationId, user.id]
-  );
   const where = conv?.isGroup ? ` in ${conv.title || 'a group'}` : '';
   const title = `New message from ${user.name}${where}`;
   const preview = body.slice(0, 140);
-  for (const o of others) {
-    await query(
-      `INSERT INTO "Notification" (id, ts, "userId", kind, title, body, "convId")
-       VALUES ($1, NOW(), $2, 'MESSAGE', $3, $4, $5)`,
-      [newId('ntf'), o.userId, title, preview, conversationId]
+
+  // All-or-nothing: the message, the conversation bump, my read cursor, and
+  // every recipient's notification commit together or not at all.
+  const msgId = await withTransaction(async (q) => {
+    const id = newId('msg');
+    await q(
+      `INSERT INTO "Message" (id, "conversationId", "senderId", body, "createdAt")
+       VALUES ($1, $2, $3, $4, NOW())`,
+      [id, conversationId, user.id, body]
     );
-  }
+    await q(`UPDATE "Conversation" SET "lastMessageAt" = NOW() WHERE id = $1`, [conversationId]);
+    await q(
+      `UPDATE "ConversationParticipant" SET "lastReadAt" = NOW() WHERE "conversationId" = $1 AND "userId" = $2`,
+      [conversationId, user.id]
+    );
+    const others = await q(
+      `SELECT "userId" FROM "ConversationParticipant" WHERE "conversationId" = $1 AND "userId" <> $2`,
+      [conversationId, user.id]
+    );
+    for (const o of others) {
+      await q(
+        `INSERT INTO "Notification" (id, ts, "userId", kind, title, body, "convId")
+         VALUES ($1, NOW(), $2, 'MESSAGE', $3, $4, $5)`,
+        [newId('ntf'), o.userId, title, preview, conversationId]
+      );
+    }
+    return id;
+  });
 
   return res.json({ ok: true, id: msgId });
 }

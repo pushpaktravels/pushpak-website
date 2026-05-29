@@ -17,7 +17,7 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import { z } from 'zod';
 import { queryOne, withTransaction, newId } from '@/lib/pg';
 import { requireAuth, visibleExecNames } from '@/lib/auth';
-import { requireView } from '@/lib/views';
+import { requireView, requireViewEdit } from '@/lib/views';
 import { audit } from '@/lib/audit';
 
 const Body = z.object({
@@ -36,6 +36,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const user = await requireAuth(req, res);
   if (!user) return;
   if (!requireView(user, res, 'legal')) return;
+  if (!requireViewEdit(user, res, 'legal')) return;
 
   const id = String(req.query.id || '');
   if (!id) return res.status(400).json({ ok: false, error: 'Missing id' });

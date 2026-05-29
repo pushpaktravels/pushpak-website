@@ -24,10 +24,13 @@ const CRON_SECRET    = process.env.CRON_SECRET;
 const INR = (n: number) => `₹${Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  // Cron-only entry. Vercel cron requests include their secret.
+  // Cron-only entry. When CRON_SECRET is configured, Vercel sends it as a
+  // bearer token and we require it — the User-Agent (spoofable) is NOT
+  // accepted as a substitute. The UA fallback only applies if no secret
+  // is set, so an existing deployment without the secret keeps working.
   const auth = req.headers.authorization || '';
   const ua   = String(req.headers['user-agent'] || '');
-  const okAuth = (CRON_SECRET && auth === `Bearer ${CRON_SECRET}`) || ua.startsWith('vercel-cron');
+  const okAuth = CRON_SECRET ? auth === `Bearer ${CRON_SECRET}` : ua.startsWith('vercel-cron');
   if (!okAuth) return res.status(401).json({ ok: false, error: 'Unauthorized' });
 
   if (!RESEND_API_KEY) {

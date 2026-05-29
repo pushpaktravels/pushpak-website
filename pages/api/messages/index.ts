@@ -122,15 +122,24 @@ async function create(user: any, req: NextApiRequest, res: NextApiResponse) {
       if (existing[0]) return existing[0].id as string;
     }
     const convId = newId('conv');
-    await q(
+    // Atomic upsert: if two requests race to open the same 1-to-1 thread,
+    // the unique dmKey makes the loser get no row back — reuse the winner's.
+    const inserted = await q(
       `INSERT INTO "Conversation" (id, "isGroup", title, "dmKey", "createdBy", "createdAt", "lastMessageAt")
-       VALUES ($1, $2, $3, $4, $5, NOW(), NOW())`,
+       VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
+       ON CONFLICT ("dmKey") DO NOTHING
+       RETURNING id`,
       [convId, isGroup, isGroup ? (parsed.data.title || null) : null, dmKey, user.id]
     );
+    if (inserted.length === 0) {
+      const row = await q(`SELECT id FROM "Conversation" WHERE "dmKey" = $1`, [dmKey]);
+      return row[0].id as string;
+    }
     for (const uid of allIds) {
       await q(
         `INSERT INTO "ConversationParticipant" (id, "conversationId", "userId", "lastReadAt", "addedAt")
-         VALUES ($1, $2, $3, $4, NOW())`,
+         VALUES ($1, $2, $3, $4, NOW())
+         ON CONFLICT ("conversationId", "userId") DO NOTHING`,
         [newId('cp'), convId, uid, uid === user.id ? new Date() : null]
       );
     }
