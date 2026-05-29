@@ -26,29 +26,29 @@ enum Role {
 }
 
 model User {
-  id              String   @id @default(cuid())
-  execId          String   @unique // "VANSHIKA01" etc — what the user types
-  name            String   // "VANSHIKA"
-  passwordHash    String   // argon2id
-  role            Role     @default(exec)
-  badge           String   @default("Executive")
-  team            String[] // exec names this user can see; empty = own only; ["ALL"] = god view
-  active          Boolean  @default(true)
-  scoreboard      Boolean  @default(false)
+  id             String    @id @default(cuid())
+  execId         String    @unique // "VANSHIKA01" etc — what the user types
+  name           String // "VANSHIKA"
+  passwordHash   String // argon2id
+  role           Role      @default(exec)
+  badge          String    @default("Executive")
+  team           String[] // exec names this user can see; empty = own only; ["ALL"] = god view
+  active         Boolean   @default(true)
+  scoreboard     Boolean   @default(false)
   // Per-user override of which views they can see/edit (overrides role default)
-  viewPerms       String[] @default([])
-  viewReadOnly    String[] @default([])
+  viewPerms      String[]  @default([])
+  viewReadOnly   String[]  @default([])
   // 2FA (TOTP)
-  totpSecret      String?  // base32 encoded; null if 2FA not enrolled yet
-  totpEnrolledAt  DateTime?
+  totpSecret     String? // base32 encoded; null if 2FA not enrolled yet
+  totpEnrolledAt DateTime?
   // Brute-force lockout
-  failedAttempts  Int      @default(0)
-  lockedUntil     DateTime?
+  failedAttempts Int       @default(0)
+  lockedUntil    DateTime?
   // Audit
-  lastLoginAt     DateTime?
-  lastLoginIp     String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  lastLoginAt    DateTime?
+  lastLoginIp    String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
   @@index([execId])
   @@index([role])
@@ -57,14 +57,14 @@ model User {
 // ─── REFRESH TOKEN STORE ──────────────────────────────────────
 // Long-lived refresh tokens; access tokens stay in HttpOnly cookies, no DB roundtrip.
 model RefreshToken {
-  id          String   @id @default(cuid())
-  userId      String
-  tokenHash   String   @unique // hash of the actual token; we never store plaintext
-  expiresAt   DateTime
-  revokedAt   DateTime?
-  userAgent   String?
-  ip          String?
-  createdAt   DateTime @default(now())
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique // hash of the actual token; we never store plaintext
+  expiresAt DateTime
+  revokedAt DateTime?
+  userAgent String?
+  ip        String?
+  createdAt DateTime  @default(now())
 
   @@index([userId])
   @@index([expiresAt])
@@ -74,46 +74,46 @@ model RefreshToken {
 // The heart of the system — one row per debtor account.
 // Mirrors 10_TRACKER sheet.
 model Account {
-  id             String   @id @default(cuid())
-  party          String   @unique // unique business key
-  family         String?
-  exec           String?  // executive name
-  cm             String?  // collection manager name
-  tier           String   @default("A") // A/B/C/D/E
-  tierOverride   String?  // manual override sticks through refresh
-  alert          String?  // "Due Soon" / "Escalate" / "Review by Mgt" / "On Hold"
-  alertOverride  String?
-  bill           Decimal  @default(0) @db.Decimal(14, 2) // outstanding
-  d30            Decimal  @default(0) @db.Decimal(14, 2)
-  d60            Decimal  @default(0) @db.Decimal(14, 2)
-  d90            Decimal  @default(0) @db.Decimal(14, 2)
-  d90p           Decimal  @default(0) @db.Decimal(14, 2)
-  stage          String?  // "S1 — AP / Accounts" etc.
-  stageCalls     Int      @default(0)
-  stageSince     DateTime?
-  recentCall     DateTime?
-  callOutcome    String?
-  nextFu         DateTime?
-  payExpected    DateTime?
-  creditLimit    Decimal  @default(0) @db.Decimal(14, 2)
-  creditPeriod   String?  // "≤30 days" etc.
-  onTimePct      String?
-  history        String?  @db.Text // freeform append-only notes
-  mgtNote        String?  @db.Text
-  status         String   @default("Pending")
-  onHold         String?  // "" / "Candidate" / "Active"
-  branch         String?
-  lastTouched    DateTime?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id            String    @id @default(cuid())
+  party         String    @unique // unique business key
+  family        String?
+  exec          String? // executive name
+  cm            String? // collection manager name
+  tier          String    @default("A") // A/B/C/D/E
+  tierOverride  String? // manual override sticks through refresh
+  alert         String? // "Due Soon" / "Escalate" / "Review by Mgt" / "On Hold"
+  alertOverride String?
+  bill          Decimal   @default(0) @db.Decimal(14, 2) // outstanding
+  d30           Decimal   @default(0) @db.Decimal(14, 2)
+  d60           Decimal   @default(0) @db.Decimal(14, 2)
+  d90           Decimal   @default(0) @db.Decimal(14, 2)
+  d90p          Decimal   @default(0) @db.Decimal(14, 2)
+  stage         String? // "S1 — AP / Accounts" etc.
+  stageCalls    Int       @default(0)
+  stageSince    DateTime?
+  recentCall    DateTime?
+  callOutcome   String?
+  nextFu        DateTime?
+  payExpected   DateTime?
+  creditLimit   Decimal   @default(0) @db.Decimal(14, 2)
+  creditPeriod  String? // "≤30 days" etc.
+  onTimePct     String?
+  history       String?   @db.Text // freeform append-only notes
+  mgtNote       String?   @db.Text
+  status        String    @default("Pending")
+  onHold        String? // "" / "Candidate" / "Active"
+  branch        String?
+  lastTouched   DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
-  promises       Promise[]
-  holdRecords    HoldRecord[]
-  legalCases    LegalCase[]
-  paymentPlans  PaymentPlan[]
-  collections   CollectionLog[]
-  history_log   AccountHistory[]
-  pointEvents   PointEvent[]
+  promises     Promise[]
+  holdRecords  HoldRecord[]
+  legalCases   LegalCase[]
+  paymentPlans PaymentPlan[]
+  collections  CollectionLog[]
+  history_log  AccountHistory[]
+  pointEvents  PointEvent[]
 
   @@index([exec])
   @@index([cm])
@@ -126,24 +126,24 @@ model Account {
 // Contact + segment info — separate from Account so we can keep
 // the contact even when the account hits zero balance.
 model ClientMaster {
-  id           String   @id @default(cuid())
-  party        String   @unique
-  family       String?
-  segment      String?
-  phone1       String?
-  phone2       String?
-  whatsapp     String?
-  email        String?
-  owner        String?
-  ap           String?
-  admin        String?
-  address      String?  @db.Text
-  creditLimit  Decimal  @default(0) @db.Decimal(14, 2)
-  creditTerms  Int      @default(0)
-  vip          String?  // "YES" / "NO" / ""
-  notes        String?  @db.Text
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id          String   @id @default(cuid())
+  party       String   @unique
+  family      String?
+  segment     String?
+  phone1      String?
+  phone2      String?
+  whatsapp    String?
+  email       String?
+  owner       String?
+  ap          String?
+  admin       String?
+  address     String?  @db.Text
+  creditLimit Decimal  @default(0) @db.Decimal(14, 2)
+  creditTerms Int      @default(0)
+  vip         String? // "YES" / "NO" / ""
+  notes       String?  @db.Text
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   @@index([party])
   @@index([segment])
@@ -162,7 +162,7 @@ model Promise {
   party          String
   family         String?
   expectedBy     DateTime
-  exec           String?       // who logged it
+  exec           String? // who logged it
   outstandingAt  Decimal       @db.Decimal(14, 2)
   status         PromiseStatus @default(Open)
   settledOn      DateTime?
@@ -170,7 +170,7 @@ model Promise {
   notes          String?       @db.Text
   loggedAt       DateTime      @default(now())
 
-  account        Account?      @relation(fields: [party], references: [party], onDelete: NoAction, onUpdate: NoAction)
+  account Account? @relation(fields: [party], references: [party], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([party])
   @@index([status])
@@ -185,19 +185,19 @@ enum HoldStatus {
 }
 
 model HoldRecord {
-  id            String     @id @default(cuid())
-  party         String
-  family        String?
-  outstanding   Decimal    @db.Decimal(14, 2)
-  reason        String     @db.Text
-  status        HoldStatus @default(Candidate)
-  confirmedBy   String?
-  confirmedOn   DateTime?
-  releasedBy    String?
-  releasedOn    DateTime?
-  addedOn       DateTime   @default(now())
+  id          String     @id @default(cuid())
+  party       String
+  family      String?
+  outstanding Decimal    @db.Decimal(14, 2)
+  reason      String     @db.Text
+  status      HoldStatus @default(Candidate)
+  confirmedBy String?
+  confirmedOn DateTime?
+  releasedBy  String?
+  releasedOn  DateTime?
+  addedOn     DateTime   @default(now())
 
-  account       Account?   @relation(fields: [party], references: [party], onDelete: NoAction, onUpdate: NoAction)
+  account Account? @relation(fields: [party], references: [party], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([party])
   @@index([status])
@@ -212,16 +212,16 @@ enum PlanInstStatus {
 }
 
 model PaymentPlan {
-  id          String      @id @default(cuid())
+  id          String           @id @default(cuid())
   party       String
   family      String?
-  planTotal   Decimal     @db.Decimal(14, 2)
+  planTotal   Decimal          @db.Decimal(14, 2)
   startDate   DateTime
   instalments PlanInstalment[]
-  createdAt   DateTime    @default(now())
+  createdAt   DateTime         @default(now())
   cancelledAt DateTime?
 
-  account     Account?    @relation(fields: [party], references: [party], onDelete: NoAction, onUpdate: NoAction)
+  account Account? @relation(fields: [party], references: [party], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([party])
 }
@@ -230,7 +230,7 @@ model PlanInstalment {
   id        String         @id @default(cuid())
   planId    String
   plan      PaymentPlan    @relation(fields: [planId], references: [id], onDelete: Cascade)
-  instNo    Int            // 1-based instalment number
+  instNo    Int // 1-based instalment number
   dueDate   DateTime
   amount    Decimal        @db.Decimal(14, 2)
   status    PlanInstStatus @default(Pending)
@@ -255,20 +255,20 @@ enum LegalStatus {
 }
 
 model LegalCase {
-  id           String      @id @default(cuid())
-  party        String
-  family       String?
-  filedOn      DateTime    @default(now())
-  outstanding  Decimal     @db.Decimal(14, 2)
-  status       LegalStatus @default(NoticeSent)
-  lawyer       String?
-  caseRef      String?
-  nextHearing  DateTime?
-  notes        String?     @db.Text
-  closedOn     DateTime?   // when terminal status set
-  updatedAt    DateTime    @updatedAt
+  id          String      @id @default(cuid())
+  party       String
+  family      String?
+  filedOn     DateTime    @default(now())
+  outstanding Decimal     @db.Decimal(14, 2)
+  status      LegalStatus @default(NoticeSent)
+  lawyer      String?
+  caseRef     String?
+  nextHearing DateTime?
+  notes       String?     @db.Text
+  closedOn    DateTime? // when terminal status set
+  updatedAt   DateTime    @updatedAt
 
-  account      Account?    @relation(fields: [party], references: [party], onDelete: NoAction, onUpdate: NoAction)
+  account Account? @relation(fields: [party], references: [party], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([party])
   @@index([status])
@@ -286,10 +286,10 @@ model CollectionLog {
   amount          Decimal  @db.Decimal(14, 2)
   prevOutstanding Decimal  @db.Decimal(14, 2)
   newOutstanding  Decimal  @db.Decimal(14, 2)
-  trigger         String?  // "Refresh by VANSHIKA01" / "Manual mark-paid" etc.
+  trigger         String? // "Refresh by VANSHIKA01" / "Manual mark-paid" etc.
   notes           String?
 
-  account         Account? @relation(fields: [party], references: [party], onDelete: NoAction, onUpdate: NoAction)
+  account Account? @relation(fields: [party], references: [party], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([party])
   @@index([exec])
@@ -304,13 +304,13 @@ model AccountHistory {
   party       String
   exec        String?
   cm          String?
-  action      String   // "Call logged" / "Promise added" / "Mark paid" etc.
+  action      String // "Call logged" / "Promise added" / "Mark paid" etc.
   oldValue    String?  @db.Text
   newValue    String?  @db.Text
   outstanding Decimal? @db.Decimal(14, 2)
-  source      String?  // "Portal" / "Refresh" / "System"
+  source      String? // "Portal" / "Refresh" / "System"
 
-  account     Account? @relation(fields: [party], references: [party], onDelete: NoAction, onUpdate: NoAction)
+  account Account? @relation(fields: [party], references: [party], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([party])
   @@index([ts])
@@ -320,15 +320,15 @@ model AccountHistory {
 // Distinct from AccountHistory: this is for OWNER security review.
 // "Who changed Reeta's credit limit last Tuesday?" answered here.
 model AuditLog {
-  id          String   @id @default(cuid())
-  ts          DateTime @default(now())
-  userId      String?  // null for system actions
-  execId      String?
-  action      String   // "USER_UPDATE" / "HOLD_APPROVE" / "TIER_CHANGE" etc.
-  target      String?  // party / userId being affected
-  detail      String?  @db.Text // JSON-encoded before/after
-  ip          String?
-  userAgent   String?
+  id        String   @id @default(cuid())
+  ts        DateTime @default(now())
+  userId    String? // null for system actions
+  execId    String?
+  action    String // "USER_UPDATE" / "HOLD_APPROVE" / "TIER_CHANGE" etc.
+  target    String? // party / userId being affected
+  detail    String?  @db.Text // JSON-encoded before/after
+  ip        String?
+  userAgent String?
 
   @@index([ts])
   @@index([userId])
@@ -356,13 +356,13 @@ model RefreshLog {
 
 // ─── POINTS LOG (scoreboard events) ───────────────────────────
 model PointEvent {
-  id      String   @id @default(cuid())
-  ts      DateTime @default(now())
-  exec    String   // points are tracked by exec NAME, not user record
-  event   String   // CALL / PROMISE_ADDED / PROMISE_KEPT / PROMISE_BROKEN / HOLD_NEW / STALE / RECOVERY
-  party   String?
-  points  Int      // can be negative
-  detail  String?
+  id     String   @id @default(cuid())
+  ts     DateTime @default(now())
+  exec   String // points are tracked by exec NAME, not user record
+  event  String // CALL / PROMISE_ADDED / PROMISE_KEPT / PROMISE_BROKEN / HOLD_NEW / STALE / RECOVERY
+  party  String?
+  points Int // can be negative
+  detail String?
 
   account Account? @relation(fields: [party], references: [party], onDelete: NoAction, onUpdate: NoAction)
 
@@ -374,8 +374,247 @@ model PointEvent {
 // ─── SETTINGS (key-value, editable from portal Settings page) ─
 model Setting {
   key       String   @id // "DUE_SOON_DAYS" / "POINTS_PER_CALL" etc.
-  value     String   // stored as string; cast on read
+  value     String // stored as string; cast on read
   category  String   @default("misc") // for the collapsible groups in UI
   updatedAt DateTime @updatedAt
   updatedBy String?
+}
+
+// ============================================================
+// ATTENDANCE & PAYROLL MODULE
+// ============================================================
+// Replaces the legacy Google-Sheets/Apps-Script attendance system.
+// Flow: download 2 biometric .xls files (yesterday + today) → upload →
+// system joins yesterday-OUT + today-IN, classifies each day, tracks
+// leaves/holidays/advances, and computes monthly payroll.
+//
+// NOTE: status/kind/source fields are plain String (not Prisma enums)
+// because these tables are applied via the idempotent raw-DDL script
+// scripts/add-attendance-tables.ts (TEXT columns) to stay additive and
+// avoid Postgres enum-type creation. Runtime queries go through lib/pg.
+
+// ─── EMPLOYEE MASTER ──────────────────────────────────────────
+// Sourced from the "Pushapk Employee Master" sheet + the extra fields
+// the module needs (machineCode, shift, weekly-off, salary, joining).
+// machineCode is THE join key to biometric rows (machine E.Code "19"
+// ≠ HR code "E-012"); matched-by-name once, then confirmed + permanent.
+model Employee {
+  id               String    @id @default(cuid())
+  machineCode      String?   @unique // biometric E.Code; null until matched
+  hrCode           String    @unique // "E-001" style HR code
+  name             String
+  department       String?
+  designation      String?
+  mobile           String?
+  email            String?
+  dob              DateTime? @db.Date
+  joiningDate      DateTime? @db.Date
+  monthlySalary    Decimal   @default(0) @db.Decimal(14, 2)
+  shiftIn          String? // scheduled in "HH:MM" (e.g. "09:30")
+  shiftOut         String? // scheduled out "HH:MM"
+  weeklyOffDay     Int       @default(0) // 0=Sun..6=Sat; varies per employee
+  leavesCarryOver  Boolean   @default(false) // only 2-3 flagged employees carry over
+  carryOverDays    Decimal   @default(0) @db.Decimal(6, 2)
+  active           Boolean   @default(true)
+  presentAddress   String?   @db.Text
+  permanentAddress String?   @db.Text
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  attendance    DailyAttendance[]
+  leaveRequests LeaveRequest[]
+  leaveBalances LeaveBalance[]
+  advances      Advance[]
+  payrolls      MonthlyPayroll[]
+
+  @@index([machineCode])
+  @@index([hrCode])
+  @@index([active])
+}
+
+// ─── DAILY ATTENDANCE ─────────────────────────────────────────
+// One row per (employee, date). Upserted: today's file fills IN, the
+// next day's file finalizes OUT. status set by the classification engine
+// but can be manually overridden (leave/holiday/on-duty human calls).
+model DailyAttendance {
+  id            String    @id @default(cuid())
+  employeeId    String
+  machineCode   String? // denormalized for fast join from raw biometric rows
+  date          DateTime  @db.Date
+  scheduledIn   String? // "HH:MM"
+  scheduledOut  String?
+  actualIn      String? // "HH:MM" from biometric
+  actualOut     String?
+  lateByMin     Int       @default(0)
+  earlyGoingMin Int       @default(0)
+  workDurMin    Int       @default(0)
+  // PRESENT / LATE / HALF_DAY / ABSENT / LEAVE / OFF_DAY / HOLIDAY / ON_DUTY / SPECIAL_PAID
+  status        String    @default("PRESENT")
+  isInformed    Boolean   @default(false) // green = informed late/early
+  deductionDays Decimal   @default(0) @db.Decimal(6, 2) // 0 / 0.25 / 0.5 / 1
+  remark        String?
+  source        String    @default("biometric") // biometric / manual / leave-form / holiday-sync
+  overridden    Boolean   @default(false)
+  overrideBy    String?
+  overrideAt    DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@unique([employeeId, date])
+  @@index([date])
+  @@index([machineCode])
+  @@index([status])
+}
+
+// ─── HOLIDAY CALENDAR ─────────────────────────────────────────
+// National paid holidays (7/yr) maintained in-system; syncs to
+// auto-mark HOLIDAY on attendance.
+model Holiday {
+  id        String   @id @default(cuid())
+  date      DateTime @unique @db.Date
+  name      String
+  createdAt DateTime @default(now())
+
+  @@index([date])
+}
+
+// ─── LEAVE REQUESTS ───────────────────────────────────────────
+// Applied via leave form. On approval, kind decides funding:
+//   PAID_FROM_BALANCE = deduct from the 18/yr balance
+//   SPECIAL_PAID      = management-granted, neither from 18 nor pay-cut
+//   LWP               = unpaid (balance exhausted or unapproved)
+model LeaveRequest {
+  id         String    @id @default(cuid())
+  employeeId String
+  fromDate   DateTime  @db.Date
+  toDate     DateTime  @db.Date
+  days       Decimal   @db.Decimal(6, 2) // half-days allowed
+  reason     String?   @db.Text
+  status     String    @default("PENDING") // PENDING / APPROVED / REJECTED
+  kind       String? // PAID_FROM_BALANCE / SPECIAL_PAID / LWP (set on approval)
+  appliedBy  String?
+  decidedBy  String?
+  decidedAt  DateTime?
+  notes      String?   @db.Text
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@index([employeeId])
+  @@index([status])
+  @@index([fromDate])
+}
+
+// ─── LEAVE BALANCE (per financial year) ───────────────────────
+// 18 paid leaves/FY (resets 1 April). opening = 18 + carryOverDays (only
+// for flagged employees). New joinees: opening 0 until 1 year completed.
+model LeaveBalance {
+  id            String   @id @default(cuid())
+  employeeId    String
+  financialYear String // "2026-2027"
+  opening       Decimal  @default(18) @db.Decimal(6, 2)
+  used          Decimal  @default(0) @db.Decimal(6, 2)
+  remaining     Decimal  @default(18) @db.Decimal(6, 2)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@unique([employeeId, financialYear])
+  @@index([employeeId])
+}
+
+// ─── ADVANCES ─────────────────────────────────────────────────
+// Principal lives in the accounts software; the portal tracks the
+// monthly deduction schedule + running balance.
+model Advance {
+  id                 String   @id @default(cuid())
+  employeeId         String
+  principal          Decimal  @db.Decimal(14, 2)
+  monthlyInstallment Decimal  @db.Decimal(14, 2)
+  startMonth         String // "2026-06"
+  remainingBalance   Decimal  @db.Decimal(14, 2)
+  active             Boolean  @default(true)
+  notes              String?  @db.Text
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  employee   Employee           @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  deductions AdvanceDeduction[]
+
+  @@index([employeeId])
+  @@index([active])
+}
+
+// ─── ADVANCE DEDUCTION LEDGER ─────────────────────────────────
+// One row per month an installment is actually deducted (drives payroll).
+model AdvanceDeduction {
+  id         String   @id @default(cuid())
+  advanceId  String
+  employeeId String
+  month      String // "2026-06"
+  amount     Decimal  @db.Decimal(14, 2)
+  createdAt  DateTime @default(now())
+
+  advance Advance @relation(fields: [advanceId], references: [id], onDelete: Cascade)
+
+  @@unique([advanceId, month])
+  @@index([employeeId])
+  @@index([month])
+}
+
+// ─── MONTHLY PAYROLL ──────────────────────────────────────────
+// Computed snapshot per (employee, month). perDay = monthlySalary /
+// calendar days in month. net_payable_days = daysInMonth − lwp −
+// 0.5×halfDays − 0.25×max(0, lateCount−3). net = perDay × payable − advance.
+model MonthlyPayroll {
+  id                String    @id @default(cuid())
+  employeeId        String
+  month             String // "2026-06"
+  daysInMonth       Int
+  presentDays       Decimal   @default(0) @db.Decimal(6, 2)
+  halfDays          Decimal   @default(0) @db.Decimal(6, 2)
+  paidLeaves        Decimal   @default(0) @db.Decimal(6, 2)
+  lwpDays           Decimal   @default(0) @db.Decimal(6, 2)
+  paidHolidays      Decimal   @default(0) @db.Decimal(6, 2)
+  weeklyOffs        Decimal   @default(0) @db.Decimal(6, 2)
+  onDutyDays        Decimal   @default(0) @db.Decimal(6, 2)
+  lateCount         Int       @default(0)
+  lateDeductionDays Decimal   @default(0) @db.Decimal(6, 2)
+  netPayableDays    Decimal   @default(0) @db.Decimal(6, 2)
+  perDaySalary      Decimal   @default(0) @db.Decimal(14, 2)
+  grossSalary       Decimal   @default(0) @db.Decimal(14, 2)
+  advanceDeduction  Decimal   @default(0) @db.Decimal(14, 2)
+  netSalary         Decimal   @default(0) @db.Decimal(14, 2)
+  finalized         Boolean   @default(false)
+  finalizedBy       String?
+  finalizedAt       DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@unique([employeeId, month])
+  @@index([month])
+}
+
+// ─── ATTENDANCE UPLOAD LOG ────────────────────────────────────
+// One row per biometric upload — audit + "last upload" display.
+model AttendanceUpload {
+  id           String    @id @default(cuid())
+  ts           DateTime  @default(now())
+  byWhom       String
+  fileNames    String // comma-joined uploaded filenames
+  reportDate   DateTime? @db.Date // the "today" date the upload represents
+  rowsParsed   Int       @default(0)
+  matched      Int       @default(0)
+  unmatched    Int       @default(0)
+  daysUpserted Int       @default(0)
+  notes        String?   @db.Text
+
+  @@index([ts])
+  @@index([reportDate])
 }

@@ -1,0 +1,342 @@
+// ============================================================
+// Employees — the attendance/payroll employee master.
+// ============================================================
+// Enrich biometric-bootstrapped stubs (fill HR code, salary, weekly-off,
+// shift, joining date), import the master sheet, and review proposed
+// machine-code ↔ employee matches.
+// ============================================================
+import { useEffect, useRef, useState } from 'react';
+import { AppShell } from '../../components/AppShell';
+
+type Employee = {
+  id: string;
+  machineCode: string | null;
+  hrCode: string;
+  name: string;
+  department: string | null;
+  designation: string | null;
+  mobile: string | null;
+  email: string | null;
+  dob: string | null;
+  joiningDate: string | null;
+  monthlySalary: string | number;
+  shiftIn: string | null;
+  shiftOut: string | null;
+  weeklyOffDay: number;
+  leavesCarryOver: boolean;
+  carryOverDays: string | number;
+  active: boolean;
+};
+
+type Proposal = {
+  stubId: string; machineCode: string; stubName: string;
+  masterId: string; masterHrCode: string; masterName: string;
+  score: number; confidence: 'high' | 'medium' | 'low';
+};
+
+const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+export default function EmployeesPage() {
+  return (
+    <AppShell title="Employees" crumb="Employees">
+      <EmployeesInner />
+    </AppShell>
+  );
+}
+
+function EmployeesInner() {
+  const [employees, setEmployees] = useState<Employee[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [editing, setEditing] = useState<Employee | null>(null);
+  const [proposals, setProposals] = useState<Proposal[]>([]);
+  const [importMsg, setImportMsg] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement | null>(null);
+
+  async function load() {
+    setLoading(true); setError(null);
+    try {
+      const r = await fetch('/api/attendance/employees');
+      const d = await r.json();
+      if (!d.ok) setError(d.error || 'Failed to load');
+      else setEmployees(d.employees);
+    } catch (e: any) { setError(e.message); }
+    finally { setLoading(false); }
+  }
+  useEffect(() => { load(); }, []);
+
+  const stubs = employees.filter(e => e.hrCode.startsWith('BIO-'));
+  const needsEnrich = employees.filter(e => e.hrCode.startsWith('BIO-') || Number(e.monthlySalary) === 0);
+
+  async function importMaster(file: File) {
+    setImportMsg('Importing…'); setError(null); setProposals([]);
+    const fd = new FormData(); fd.append('file', file);
+    try {
+      const r = await fetch('/api/attendance/import-master', { method: 'POST', body: fd });
+      const d = await r.json();
+      if (!d.ok) { setError(d.error || 'Import failed'); setImportMsg(null); return; }
+      const s = d.summary;
+      setImportMsg(`Imported: ${s.created} new, ${s.updated} updated, ${s.skipped} skipped.${s.proposals.length ? ` ${s.proposals.length} code match(es) to review below.` : ''}`);
+      setProposals(s.proposals || []);
+      load();
+    } catch (e: any) { setError(e.message); setImportMsg(null); }
+  }
+
+  async function confirmMatches(confs: { stubId: string; masterId: string }[]) {
+    if (confs.length === 0) return;
+    try {
+      const r = await fetch('/api/attendance/match-codes', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirmations: confs }),
+      });
+      const d = await r.json();
+      if (!d.ok) { setError(d.error || 'Match failed'); return; }
+      setProposals([]); setImportMsg(`Linked ${d.linked} machine code(s).`);
+      load();
+    } catch (e: any) { setError(e.message); }
+  }
+
+  return (
+    <div style={{ maxWidth: 1280, margin: '0 auto', padding: '4px 4px 60px' }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 16, marginBottom: 18, flexWrap: 'wrap' }}>
+        <h1 style={{ fontSize: 22, fontWeight: 600, color: 'var(--ink)', margin: 0 }}>Employees</h1>
+        <div style={{ fontSize: 13, color: 'var(--ink-soft)' }}>
+          {employees.length} total · {stubs.length} from biometric · {needsEnrich.length} need details
+        </div>
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 10 }}>
+          <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" style={{ display: 'none' }}
+            onChange={e => { const f = e.target.files?.[0]; if (f) importMaster(f); e.currentTarget.value = ''; }} />
+          <button onClick={() => fileRef.current?.click()} style={btnSecondary}>Import Master Sheet</button>
+          <button onClick={() => setEditing(blankEmployee())} style={btnPrimary}>+ Add Employee</button>
+        </div>
+      </div>
+
+      {error && <Banner kind="error">{error}</Banner>}
+      {importMsg && <Banner kind="info">{importMsg}</Banner>}
+
+      {proposals.length > 0 && (
+        <MatchReview proposals={proposals} onConfirm={confirmMatches} onDismiss={() => setProposals([])} />
+      )}
+
+      {loading ? (
+        <div style={{ padding: 40, color: 'var(--ink-soft)' }}>Loading…</div>
+      ) : (
+        <div style={{ overflowX: 'auto', borderRadius: 12, border: '1px solid rgba(15,40,85,0.10)' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+            <thead>
+              <tr style={{ background: 'rgba(15,40,85,0.04)', textAlign: 'left' }}>
+                {['Name', 'HR Code', 'Machine', 'Dept', 'Shift', 'Weekly Off', 'Salary', 'Status', ''].map(h => (
+                  <th key={h} style={th}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {employees.map(e => {
+                const stub = e.hrCode.startsWith('BIO-');
+                const noSalary = Number(e.monthlySalary) === 0;
+                return (
+                  <tr key={e.id} style={{ borderTop: '1px solid rgba(15,40,85,0.06)' }}>
+                    <td style={td}>
+                      {e.name}
+                      {(stub || noSalary) && <span style={pill('rust')}>needs details</span>}
+                    </td>
+                    <td style={td}>{stub ? <span style={{ color: 'var(--ink-soft)' }}>{e.hrCode}</span> : e.hrCode}</td>
+                    <td style={td}>{e.machineCode || '—'}</td>
+                    <td style={td}>{e.department || '—'}</td>
+                    <td style={td}>{e.shiftIn && e.shiftOut ? `${e.shiftIn}–${e.shiftOut}` : '—'}</td>
+                    <td style={td}>{DAYS[e.weeklyOffDay] ?? '—'}</td>
+                    <td style={{ ...td, fontVariantNumeric: 'tabular-nums' }}>
+                      {Number(e.monthlySalary) > 0 ? `₹${Number(e.monthlySalary).toLocaleString('en-IN')}` : '—'}
+                    </td>
+                    <td style={td}>{e.active ? <span style={pill('sage')}>active</span> : <span style={pill('muted')}>inactive</span>}</td>
+                    <td style={td}>
+                      <button onClick={() => setEditing(e)} style={btnLink}>Edit</button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {editing && (
+        <EditDrawer
+          employee={editing}
+          onClose={() => setEditing(null)}
+          onSaved={() => { setEditing(null); load(); }}
+          onError={setError}
+        />
+      )}
+    </div>
+  );
+}
+
+function MatchReview({ proposals, onConfirm, onDismiss }: {
+  proposals: Proposal[];
+  onConfirm: (c: { stubId: string; masterId: string }[]) => void;
+  onDismiss: () => void;
+}) {
+  // default-select high & medium confidence
+  const [picked, setPicked] = useState<Set<string>>(
+    () => new Set(proposals.filter(p => p.confidence !== 'low').map(p => p.stubId))
+  );
+  function toggle(id: string) {
+    setPicked(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  }
+  const confColor = (c: string) => c === 'high' ? 'sage' : c === 'medium' ? 'gold' : 'rust';
+  return (
+    <div style={{ marginBottom: 20, padding: 18, borderRadius: 12, border: '1px solid rgba(201,164,114,0.4)', background: 'rgba(201,164,114,0.06)' }}>
+      <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--ink)', marginBottom: 4 }}>Review machine-code matches</div>
+      <div style={{ fontSize: 12.5, color: 'var(--ink-soft)', marginBottom: 14 }}>
+        We matched biometric names to your master sheet. Confirm to lock in each machine code permanently.
+      </div>
+      <div style={{ display: 'grid', gap: 8 }}>
+        {proposals.map(p => (
+          <label key={p.stubId} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 12px', background: '#fff', borderRadius: 8, cursor: 'pointer' }}>
+            <input type="checkbox" checked={picked.has(p.stubId)} onChange={() => toggle(p.stubId)} />
+            <span style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600, minWidth: 44 }}>#{p.machineCode}</span>
+            <span style={{ flex: 1 }}>
+              <b>{p.stubName}</b> <span style={{ color: 'var(--ink-soft)' }}>→ {p.masterName} ({p.masterHrCode})</span>
+            </span>
+            <span style={pill(confColor(p.confidence) as any)}>{p.confidence} · {p.score}</span>
+          </label>
+        ))}
+      </div>
+      <div style={{ display: 'flex', gap: 10, marginTop: 14 }}>
+        <button onClick={() => onConfirm(proposals.filter(p => picked.has(p.stubId)).map(p => ({ stubId: p.stubId, masterId: p.masterId })))} style={btnPrimary}>
+          Confirm {picked.size} match{picked.size === 1 ? '' : 'es'}
+        </button>
+        <button onClick={onDismiss} style={btnSecondary}>Dismiss</button>
+      </div>
+    </div>
+  );
+}
+
+function EditDrawer({ employee, onClose, onSaved, onError }: {
+  employee: Employee; onClose: () => void; onSaved: () => void; onError: (s: string) => void;
+}) {
+  const [f, setF] = useState<Employee>({ ...employee });
+  const [saving, setSaving] = useState(false);
+  const isNew = !employee.id;
+  function set<K extends keyof Employee>(k: K, v: Employee[K]) { setF(p => ({ ...p, [k]: v })); }
+
+  async function save() {
+    setSaving(true);
+    const payload: any = {
+      hrCode: f.hrCode, name: f.name,
+      machineCode: emptyToNull(f.machineCode), department: emptyToNull(f.department),
+      designation: emptyToNull(f.designation), mobile: emptyToNull(f.mobile), email: emptyToNull(f.email),
+      dob: emptyToNull(f.dob), joiningDate: emptyToNull(f.joiningDate),
+      monthlySalary: Number(f.monthlySalary) || 0,
+      shiftIn: emptyToNull(f.shiftIn), shiftOut: emptyToNull(f.shiftOut),
+      weeklyOffDay: Number(f.weeklyOffDay) || 0,
+      leavesCarryOver: !!f.leavesCarryOver, carryOverDays: Number(f.carryOverDays) || 0,
+      active: !!f.active,
+    };
+    if (!isNew) payload.id = employee.id;
+    try {
+      const r = await fetch('/api/attendance/employees', {
+        method: isNew ? 'POST' : 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const d = await r.json();
+      if (!d.ok) { onError(d.error || 'Save failed'); setSaving(false); return; }
+      onSaved();
+    } catch (e: any) { onError(e.message); setSaving(false); }
+  }
+
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(10,20,40,0.4)', zIndex: 900, display: 'flex', justifyContent: 'flex-end' }}>
+      <div onClick={e => e.stopPropagation()} style={{ width: 460, maxWidth: '100%', height: '100%', background: '#fff', overflowY: 'auto', padding: 26, boxShadow: '-8px 0 24px rgba(0,0,0,0.12)' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
+          <h2 style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>{isNew ? 'Add Employee' : f.name}</h2>
+          <button onClick={onClose} style={btnLink}>Close</button>
+        </div>
+        <div style={{ display: 'grid', gap: 14 }}>
+          <Field label="Name"><input style={inp} value={f.name} onChange={e => set('name', e.target.value)} /></Field>
+          <Field label="HR Code (E-001)"><input style={inp} value={f.hrCode} onChange={e => set('hrCode', e.target.value)} /></Field>
+          <Field label="Machine Code"><input style={inp} value={f.machineCode || ''} onChange={e => set('machineCode', e.target.value)} /></Field>
+          <Row>
+            <Field label="Department"><input style={inp} value={f.department || ''} onChange={e => set('department', e.target.value)} /></Field>
+            <Field label="Designation"><input style={inp} value={f.designation || ''} onChange={e => set('designation', e.target.value)} /></Field>
+          </Row>
+          <Row>
+            <Field label="Mobile"><input style={inp} value={f.mobile || ''} onChange={e => set('mobile', e.target.value)} /></Field>
+            <Field label="Email"><input style={inp} value={f.email || ''} onChange={e => set('email', e.target.value)} /></Field>
+          </Row>
+          <Row>
+            <Field label="Shift In (HH:MM)"><input style={inp} placeholder="09:30" value={f.shiftIn || ''} onChange={e => set('shiftIn', e.target.value)} /></Field>
+            <Field label="Shift Out (HH:MM)"><input style={inp} placeholder="18:30" value={f.shiftOut || ''} onChange={e => set('shiftOut', e.target.value)} /></Field>
+          </Row>
+          <Row>
+            <Field label="Weekly Off">
+              <select style={inp} value={f.weeklyOffDay} onChange={e => set('weeklyOffDay', Number(e.target.value) as any)}>
+                {DAYS.map((d, i) => <option key={i} value={i}>{d}</option>)}
+              </select>
+            </Field>
+            <Field label="Monthly Salary (₹)"><input style={inp} type="number" value={f.monthlySalary} onChange={e => set('monthlySalary', e.target.value as any)} /></Field>
+          </Row>
+          <Row>
+            <Field label="DOB"><input style={inp} type="date" value={f.dob || ''} onChange={e => set('dob', e.target.value)} /></Field>
+            <Field label="Joining Date"><input style={inp} type="date" value={f.joiningDate || ''} onChange={e => set('joiningDate', e.target.value)} /></Field>
+          </Row>
+          <Row>
+            <Field label="Leaves Carry Over">
+              <select style={inp} value={f.leavesCarryOver ? '1' : '0'} onChange={e => set('leavesCarryOver', e.target.value === '1' as any)}>
+                <option value="0">No</option><option value="1">Yes</option>
+              </select>
+            </Field>
+            <Field label="Carry-over Days"><input style={inp} type="number" value={f.carryOverDays} onChange={e => set('carryOverDays', e.target.value as any)} /></Field>
+          </Row>
+          <Field label="Active">
+            <select style={inp} value={f.active ? '1' : '0'} onChange={e => set('active', e.target.value === '1' as any)}>
+              <option value="1">Active</option><option value="0">Inactive</option>
+            </select>
+          </Field>
+        </div>
+        <div style={{ display: 'flex', gap: 10, marginTop: 22 }}>
+          <button onClick={save} disabled={saving} style={btnPrimary}>{saving ? 'Saving…' : 'Save'}</button>
+          <button onClick={onClose} style={btnSecondary}>Cancel</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── small bits ──────────────────────────────────────────────
+function blankEmployee(): Employee {
+  return {
+    id: '', machineCode: null, hrCode: '', name: '', department: null, designation: null,
+    mobile: null, email: null, dob: null, joiningDate: null, monthlySalary: 0,
+    shiftIn: null, shiftOut: null, weeklyOffDay: 0, leavesCarryOver: false, carryOverDays: 0, active: true,
+  };
+}
+function emptyToNull(s: string | null): string | null { const t = (s ?? '').trim(); return t ? t : null; }
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return <label style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: 1 }}>
+    <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--ink-soft)' }}>{label}</span>
+    {children}
+  </label>;
+}
+function Row({ children }: { children: React.ReactNode }) { return <div style={{ display: 'flex', gap: 12 }}>{children}</div>; }
+function Banner({ kind, children }: { kind: 'error' | 'info'; children: React.ReactNode }) {
+  const c = kind === 'error' ? 'rust' : 'navy-deep';
+  return <div style={{ marginBottom: 14, padding: '11px 15px', borderRadius: 10, fontSize: 13, color: `var(--${c}, #333)`, background: kind === 'error' ? 'rgba(181,72,61,0.08)' : 'rgba(15,40,85,0.05)', border: `1px solid ${kind === 'error' ? 'rgba(181,72,61,0.25)' : 'rgba(15,40,85,0.15)'}` }}>{children}</div>;
+}
+const th: React.CSSProperties = { padding: '10px 12px', fontSize: 11, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--ink-soft)' };
+const td: React.CSSProperties = { padding: '10px 12px', color: 'var(--ink)' };
+const inp: React.CSSProperties = { padding: '8px 10px', borderRadius: 8, border: '1px solid rgba(15,40,85,0.2)', fontSize: 13, width: '100%', boxSizing: 'border-box' };
+const btnPrimary: React.CSSProperties = { padding: '9px 18px', borderRadius: 8, background: 'linear-gradient(180deg,#1A3F7E,#0F2855)', color: '#fff', border: 'none', fontSize: 12.5, fontWeight: 700, cursor: 'pointer' };
+const btnSecondary: React.CSSProperties = { padding: '9px 18px', borderRadius: 8, background: '#fff', color: 'var(--ink)', border: '1px solid rgba(15,40,85,0.22)', fontSize: 12.5, fontWeight: 600, cursor: 'pointer' };
+const btnLink: React.CSSProperties = { background: 'transparent', border: 'none', color: 'var(--navy-deep, #1A3F7E)', cursor: 'pointer', fontSize: 12.5, fontWeight: 700 };
+function pill(tone: 'sage' | 'rust' | 'gold' | 'muted'): React.CSSProperties {
+  const map = {
+    sage: ['rgba(46,108,84,0.12)', '#2E6C54'],
+    rust: ['rgba(181,72,61,0.12)', '#B5483D'],
+    gold: ['rgba(201,164,114,0.18)', '#9A7634'],
+    muted: ['rgba(15,40,85,0.08)', 'var(--ink-soft)'],
+  }[tone];
+  return { marginLeft: 8, padding: '2px 8px', borderRadius: 999, fontSize: 10.5, fontWeight: 700, background: map[0], color: map[1] };
+}

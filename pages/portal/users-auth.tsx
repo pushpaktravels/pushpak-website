@@ -47,6 +47,7 @@ const VIEWS: { key: string; label: string; roles: Role[] }[] = [
   { key: 'users-auth',     label: 'Users & Authorities', roles: ['owner'] },
   { key: 'bulk-cm',        label: 'Bulk CM Assignment', roles: ['owner','admin'] },
   { key: 'audit',          label: 'Audit Log',          roles: ['owner'] },
+  { key: 'permissions',    label: 'Permissions',        roles: ['owner'] },
   { key: 'activity',       label: 'Activity & Time',    roles: ['owner','admin'] },
   { key: 'settings',       label: 'Settings',           roles: ['owner','admin'] },
 ];
