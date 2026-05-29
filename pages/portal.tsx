@@ -1,192 +1,230 @@
 // ============================================================
-// /portal — Dashboard view.
-// Hero KPI + secondary KPI row + tier distribution + last refresh card.
-// Ported from the legacy Page-v2.html dashboard section.
+// /portal — Personal Dashboard (default landing for every user).
+// ============================================================
+// Shows the signed-in user's own working stats, attendance summary,
+// leave balance, consistency, and performance. Activity numbers
+// (today / week / month) come from the real ActivityDay table;
+// HR fields render as placeholders pending the HR system rollout.
+//
+// The previous accounts-focused dashboard is now at /portal/followup.
 // ============================================================
 import { useEffect, useState } from 'react';
 import { AppShell } from '../components/AppShell';
-import { AccountDrawer } from '../components/AccountDrawer';
-import { fmtINR, fmtRelative } from '../lib/fmt';
 
-type CreditRow = {
-  id: string; party: string; family: string | null; exec: string | null; bill: number;
+type Daily = { date: string; sec: number };
+type Data = {
+  ok: true;
+  profile: { name: string; execId: string; role: string; email: string | null; lastLoginAt: string | null };
+  activity: {
+    todaySec: number; weekSec: number; monthSec: number;
+    lastPingAt: string | null;
+    monthActiveDays: number; businessDays: number; consistencyPct: number;
+    daily: Daily[];
+  };
+  performance: {
+    monthPoints: number; totalPoints: number;
+    monthEvents: number; monthActions: number;
+  };
+  hr: {
+    placeholder: true;
+    leavesTotal: number;
+    leavesUsed: number | null;
+    leavesRemaining: number | null;
+    presentDaysThisMonth: number | null;
+    absentDaysThisMonth: number | null;
+    paidLeavesThisMonth: number | null;
+    advanceBalance: number | null;
+    activeInstalments: number | null;
+  };
 };
 
-type DashboardData = {
-  total: number;
-  accounts: number;
-  d30: number; d60: number; d90: number; d90p: number;
-  counts: Record<string, number>;
-  onHoldActive: number;
-  onHoldCandidate: number;
-  lastRefreshAt: string | null;
-  lastRefreshBy: string | null;
-  lastRefreshDelta: number | null;
-  credits: CreditRow[];
-  creditTotal: number;
-};
+function fmtHM(sec: number): string {
+  if (!sec || sec <= 0) return '0m';
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  if (h === 0) return `${m}m`;
+  if (m === 0) return `${h}h`;
+  return `${h}h ${m}m`;
+}
+function greet(): string {
+  const h = new Date().getHours();
+  if (h < 12) return 'Good morning';
+  if (h < 17) return 'Good afternoon';
+  return 'Good evening';
+}
 
-export default function DashboardPage() {
-  const [data, setData] = useState<DashboardData | null>(null);
-  const [loading, setLoading] = useState(true);
+export default function PersonalDashboardPage() {
+  const [data, setData] = useState<Data | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [openId, setOpenId] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch('/api/dashboard')
+    fetch('/api/me/dashboard')
       .then(r => r.json())
       .then(r => {
-        if (!r?.ok) throw new Error(r?.error || 'Failed to load dashboard');
-        setData(r.data);
+        if (!r?.ok) throw new Error(r?.error || 'Failed to load');
+        setData(r);
       })
-      .catch(e => setError(e.message))
-      .finally(() => setLoading(false));
+      .catch(e => setError(e.message));
   }, []);
 
+  if (error) return <AppShell title="Dashboard" crumb="Personal · Overview"><div style={{ padding: 32, color: 'var(--rust)' }}>Failed: {error}</div></AppShell>;
+  if (!data) return <AppShell title="Dashboard" crumb="Personal · Overview"><div style={{ padding: 32, color: 'var(--ink-soft)' }}>Loading…</div></AppShell>;
+
+  const p = data.profile;
+  const a = data.activity;
+  const perf = data.performance;
+  const hr = data.hr;
+  const dailyMax = Math.max(1, ...a.daily.map(d => d.sec));
+
   return (
-    <AppShell title="Dashboard" crumb="Overview">
-      {loading && <div style={{ padding: 40, color: 'var(--t-3)' }}>Loading dashboard…</div>}
-      {error && <div style={{ padding: 40, color: 'var(--rust)' }}>Failed: {error}</div>}
-
-      {data && (
-        <>
-          {/* ── HERO ROW: 4 KPI cards ── */}
-          <div className="dash-row four">
-            <div className="kpi hero">
-              <div className="kpi-label">Total Outstanding</div>
-              <div className="kpi-num lg">{fmtINR(data.total)}</div>
-              <div className="kpi-meta">{data.accounts.toLocaleString('en-IN')} accounts</div>
-            </div>
-            <div className="kpi">
-              <div className="kpi-label">On Hold · Active</div>
-              <div className="kpi-num" style={{ color: 'var(--rust)' }}>{data.onHoldActive}</div>
-              <div className="kpi-meta">blocking new bookings</div>
-            </div>
-            <div className="kpi">
-              <div className="kpi-label">Hold Candidates</div>
-              <div className="kpi-num" style={{ color: 'var(--amber)' }}>{data.onHoldCandidate}</div>
-              <div className="kpi-meta">awaiting approval</div>
-            </div>
-            <div className="kpi">
-              <div className="kpi-label">Last Refresh</div>
-              <div className="kpi-num md">{fmtRelative(data.lastRefreshAt)}</div>
-              <div className="kpi-meta">
-                {data.lastRefreshBy ? `by ${data.lastRefreshBy}` : 'No refresh yet'}
-                {data.lastRefreshDelta != null && (
-                  <span style={{ marginLeft: 8, color: data.lastRefreshDelta < 0 ? 'var(--sage)' : 'var(--rust)' }}>
-                    {data.lastRefreshDelta < 0 ? '↓' : '↑'} {fmtINR(Math.abs(data.lastRefreshDelta))}
-                  </span>
-                )}
-              </div>
-            </div>
+    <AppShell title="Dashboard" crumb="Personal · Overview">
+      <div style={{ maxWidth: 1180, margin: '0 auto', padding: '0 4px 60px' }}>
+        {/* Greeting */}
+        <div style={{ marginBottom: 26 }}>
+          <div style={{ fontSize: 12, letterSpacing: '.28em', textTransform: 'uppercase', color: 'var(--ink-soft)', fontWeight: 700, marginBottom: 6 }}>
+            {greet()},
           </div>
+          <h1 style={{ fontSize: 28, fontWeight: 700, color: 'var(--ink)', margin: 0, letterSpacing: '-.014em' }}>
+            {p.name}
+          </h1>
+          <div style={{ fontSize: 13, color: 'var(--ink-soft)', marginTop: 6 }}>
+            {p.execId} · {p.role}
+            {p.lastLoginAt && <> · Last sign-in {new Date(p.lastLoginAt).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}</>}
+          </div>
+        </div>
 
-          {/* ── AGING + TIER DISTRIBUTION ── */}
-          <div className="dash-row two" style={{ marginTop: 20 }}>
-            <div className="kpi">
-              <div className="kpi-label">Aging Buckets</div>
-              <div style={{ marginTop: 22, display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 24 }}>
-                {[
-                  { label: '≤ 30 d', value: data.d30 },
-                  { label: '≤ 60 d', value: data.d60 },
-                  { label: '≤ 90 d', value: data.d90 },
-                  { label: '> 90 d', value: data.d90p },
-                ].map(b => (
-                  <div key={b.label} style={{ padding: '6px 0' }}>
-                    <div style={{ fontSize: 9.5, letterSpacing: '.22em', textTransform: 'uppercase', color: 'var(--t-3)', fontWeight: 700, marginBottom: 10 }}>{b.label}</div>
-                    <div style={{ fontFamily: "inherit", fontSize: 16, color: 'var(--navy-deep)', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{fmtINR(b.value)}</div>
-                  </div>
-                ))}
+        {/* Top stat strip — activity & leaves */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 14, marginBottom: 20 }}>
+          <StatCard label="Today" value={fmtHM(a.todaySec)} sub="active time" />
+          <StatCard label="This week" value={fmtHM(a.weekSec)} sub="rolling 7 days" />
+          <StatCard label="This month" value={fmtHM(a.monthSec)} sub={`${a.monthActiveDays} days worked`} />
+          <StatCard label="Consistency" value={`${a.consistencyPct}%`} sub={`${a.monthActiveDays}/${a.businessDays} business days`} accent={a.consistencyPct >= 80 ? 'sage' : a.consistencyPct >= 60 ? 'amber' : 'rust'} />
+          <StatCard
+            label="Leaves remaining"
+            value={hr.leavesRemaining != null ? `${hr.leavesRemaining}` : `${hr.leavesTotal}`}
+            sub={hr.leavesRemaining != null ? `of ${hr.leavesTotal} per year` : `${hr.leavesTotal} per year · HR pending`}
+            placeholder={hr.leavesRemaining == null}
+          />
+        </div>
+
+        {/* Two-column body */}
+        <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 18, marginBottom: 18 }}>
+          {/* Daily activity chart */}
+          <Section title="Your daily activity · last 14 days">
+            {a.daily.length === 0 ? (
+              <div style={{ fontSize: 13, color: 'var(--ink-soft)', fontStyle: 'italic', padding: '18px 0' }}>
+                No activity recorded yet. As you use the portal, working minutes accumulate here.
               </div>
-            </div>
-
-            <div className="kpi">
-              <div className="kpi-label">Tier Distribution</div>
-              <div style={{ marginTop: 22, display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 14 }}>
-                {(['A','B','C','D','E'] as const).map(t => (
-                  <div key={t} style={{ textAlign: 'center', padding: '4px 0' }}>
-                    <div className={`tier tier-${t}`} style={{ display: 'inline-block', padding: '6px 14px', fontSize: 14, fontWeight: 700 }}>{t}</div>
-                    <div style={{ marginTop: 14, fontSize: 20, fontWeight: 600, color: 'var(--navy-deep)', fontVariantNumeric: 'tabular-nums' }}>{data.counts[t] || 0}</div>
-                    <div style={{ fontSize: 10, letterSpacing: '.16em', textTransform: 'uppercase', color: 'var(--t-3)', fontWeight: 600, marginTop: 6 }}>
-                      {{ A: 'Recents', B: 'Due', C: 'Overdue', D: 'Doubtful', E: 'Legal' }[t]}
+            ) : (
+              <div style={{ display: 'flex', alignItems: 'flex-end', gap: 6, height: 140 }}>
+                {a.daily.map(d => {
+                  const pct = d.sec / dailyMax;
+                  return (
+                    <div key={d.date} title={`${d.date}: ${fmtHM(d.sec)}`} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: 0 }}>
+                      <div style={{ width: '100%', height: `${Math.max(2, pct * 100)}%`, background: 'linear-gradient(180deg,#1A3F7E,#0F2855)', borderRadius: '4px 4px 0 0' }} />
+                      <div style={{ fontSize: 9.5, color: 'var(--ink-soft)', marginTop: 6 }}>{new Date(d.date).getDate()}</div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
-            </div>
+            )}
+          </Section>
+
+          {/* Performance card */}
+          <Section title="Performance this month">
+            <Row label="Actions logged"  value={`${perf.monthActions}`} />
+            <Row label="Point events"    value={`${perf.monthEvents}`} />
+            <Row label="Points earned"   value={`${perf.monthPoints}`} accent={perf.monthPoints >= 0 ? 'sage' : 'rust'} />
+            <hr style={{ border: 'none', borderTop: '1px solid rgba(15,40,85,0.08)', margin: '12px 0' }} />
+            <Row label="Lifetime points" value={`${perf.totalPoints}`} bold />
+          </Section>
+        </div>
+
+        {/* Attendance summary (placeholder) */}
+        <Section title="Attendance this month" pendingHR>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12 }}>
+            <Mini label="Present days" value={hr.presentDaysThisMonth} />
+            <Mini label="Absent days"  value={hr.absentDaysThisMonth} accent="rust" />
+            <Mini label="Paid leaves"  value={hr.paidLeavesThisMonth} />
+            <Mini label="Half-days"    value={null} />
           </div>
+        </Section>
 
-          {/* ── CUSTOMER CREDITS (advances / refunds) ── */}
-          {data.credits && data.credits.length > 0 && (
-            <div className="kpi" style={{ marginTop: 20, padding: 0, overflow: 'hidden' }}>
-              <div style={{
-                padding: '18px 22px', borderBottom: '1px solid var(--line, #e7eaf0)',
-                display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap',
-              }}>
-                <div className="kpi-label" style={{ margin: 0 }}>Customer Credits</div>
-                <div style={{ fontSize: 12.5, color: 'var(--ink-soft)' }}>
-                  Customers who owe nothing — these are advances or pending refunds
-                </div>
-                <div style={{ marginLeft: 'auto', fontFamily: 'inherit', fontSize: 16, fontWeight: 700, color: 'var(--sage, #2E6C54)' }}>
-                  {fmtINR(Math.abs(data.creditTotal))}
-                </div>
-                <div style={{ fontSize: 11, color: 'var(--ink-soft)', letterSpacing: '.18em', textTransform: 'uppercase', fontWeight: 700 }}>
-                  {data.credits.length} parties
-                </div>
-              </div>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
-                <thead>
-                  <tr style={{ background: 'rgba(15,40,85,0.04)' }}>
-                    <th style={thStyle}>Party</th>
-                    <th style={thStyle}>Family</th>
-                    <th style={thStyle}>Exec</th>
-                    <th style={{ ...thStyle, textAlign: 'right' }}>Credit available</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.credits.map(c => (
-                    <tr key={c.id}
-                      onClick={() => setOpenId(c.id)}
-                      style={{ cursor: 'pointer', borderBottom: '1px solid rgba(15,40,85,0.06)' }}
-                      onMouseEnter={e => (e.currentTarget.style.background = 'rgba(46,108,84,0.05)')}
-                      onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
-                      <td style={tdStyle}><strong style={{ color: 'var(--navy-deep)' }}>{c.party}</strong></td>
-                      <td style={tdStyle}>{c.family || '—'}</td>
-                      <td style={tdStyle}>{c.exec || '—'}</td>
-                      <td style={{ ...tdStyle, textAlign: 'right', fontFamily: 'inherit', fontWeight: 700, color: 'var(--sage, #2E6C54)', fontVariantNumeric: 'tabular-nums' }}>
-                        {fmtINR(Math.abs(c.bill))}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          {/* ── EMPTY STATE NOTE while migration pending ── */}
-          {data.accounts === 0 && (
-            <div className="view-empty" style={{ marginTop: 24 }}>
-              <h3>No accounts loaded yet</h3>
-              <p>
-                The database is wired up and ready. Once you upload your first FinBook export
-                via <strong>Upload &amp; Refresh</strong>, accounts, aging buckets, and tier counts
-                will populate here automatically.
-              </p>
-            </div>
-          )}
-        </>
-      )}
-      <AccountDrawer accountId={openId} onClose={() => setOpenId(null)} />
+        {/* Advances + Installments (placeholder) */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18, marginTop: 18 }}>
+          <Section title="Advance balance" pendingHR>
+            <Mini label="Outstanding advance" value={hr.advanceBalance != null ? `₹${hr.advanceBalance.toLocaleString('en-IN')}` : null} />
+          </Section>
+          <Section title="Monthly installments" pendingHR>
+            <Mini label="Active installments" value={hr.activeInstalments} />
+          </Section>
+        </div>
+      </div>
     </AppShell>
   );
 }
 
-const thStyle: React.CSSProperties = {
-  textAlign: 'left', padding: '12px 18px', fontSize: 10,
-  letterSpacing: '.16em', textTransform: 'uppercase',
-  color: 'var(--ink-soft)', fontWeight: 700,
-};
-const tdStyle: React.CSSProperties = {
-  textAlign: 'left', padding: '14px 18px',
-  color: 'var(--ink)', verticalAlign: 'middle',
-};
+// ─── Bits ───────────────────────────────────────────────────────
+function StatCard({ label, value, sub, accent, placeholder }: { label: string; value: string; sub?: string; accent?: 'sage' | 'amber' | 'rust'; placeholder?: boolean }) {
+  const color = accent === 'sage' ? 'var(--sage, #2E6C54)'
+              : accent === 'amber' ? 'var(--amber, #B58430)'
+              : accent === 'rust' ? 'var(--rust, #B5483D)'
+              : 'var(--ink)';
+  return (
+    <div style={{
+      padding: '18px 20px',
+      background: placeholder ? 'rgba(217,165,69,0.06)' : 'rgba(255,255,255,0.65)',
+      border: placeholder ? '1px dashed rgba(217,165,69,0.40)' : '1px solid rgba(15,40,85,0.10)',
+      borderRadius: 12, minHeight: 100,
+    }}>
+      <div style={{ fontSize: 10, letterSpacing: '.24em', textTransform: 'uppercase', color: 'var(--ink-soft)', fontWeight: 700 }}>{label}</div>
+      <div style={{ fontSize: 26, fontWeight: 700, color, marginTop: 8, fontVariantNumeric: 'tabular-nums', lineHeight: 1.1 }}>{value}</div>
+      {sub && <div style={{ fontSize: 11.5, color: 'var(--ink-soft)', marginTop: 6 }}>{sub}</div>}
+    </div>
+  );
+}
+
+function Section({ title, children, pendingHR }: { title: string; children: React.ReactNode; pendingHR?: boolean }) {
+  return (
+    <div style={{
+      padding: '20px 22px',
+      background: pendingHR ? 'rgba(217,165,69,0.05)' : 'rgba(255,255,255,0.65)',
+      border: pendingHR ? '1px dashed rgba(217,165,69,0.30)' : '1px solid rgba(15,40,85,0.10)',
+      borderRadius: 12,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 14 }}>
+        <div style={{ fontSize: 11, letterSpacing: '.22em', textTransform: 'uppercase', color: 'var(--ink-soft)', fontWeight: 700 }}>{title}</div>
+        {pendingHR && (
+          <span style={{
+            fontSize: 9.5, letterSpacing: '.18em', textTransform: 'uppercase', fontWeight: 700,
+            padding: '3px 8px', borderRadius: 4,
+            background: 'rgba(217,165,69,0.18)', color: 'var(--amber, #B58430)',
+          }}>HR system pending</span>
+        )}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function Row({ label, value, accent, bold }: { label: string; value: string; accent?: 'sage' | 'rust'; bold?: boolean }) {
+  const color = accent === 'sage' ? 'var(--sage, #2E6C54)' : accent === 'rust' ? 'var(--rust, #B5483D)' : 'var(--ink)';
+  return (
+    <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 8 }}>
+      <span style={{ fontSize: 12.5, color: 'var(--ink-soft)' }}>{label}</span>
+      <span style={{ fontSize: bold ? 16 : 14, fontWeight: bold ? 700 : 600, color, fontVariantNumeric: 'tabular-nums' }}>{value}</span>
+    </div>
+  );
+}
+
+function Mini({ label, value, accent }: { label: string; value: string | number | null; accent?: 'rust' | 'sage' }) {
+  const color = accent === 'rust' ? 'var(--rust, #B5483D)' : accent === 'sage' ? 'var(--sage, #2E6C54)' : 'var(--ink)';
+  return (
+    <div>
+      <div style={{ fontSize: 10, letterSpacing: '.22em', textTransform: 'uppercase', color: 'var(--ink-soft)', fontWeight: 700, marginBottom: 6 }}>{label}</div>
+      <div style={{ fontSize: 20, fontWeight: 700, color: value == null ? 'rgba(15,40,85,0.30)' : color, fontVariantNumeric: 'tabular-nums' }}>
+        {value == null ? '—' : value}
+      </div>
+    </div>
+  );
+}

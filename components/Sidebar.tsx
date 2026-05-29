@@ -15,29 +15,41 @@ export type CurrentUser = {
   viewPerms?: string[] | null;
 };
 
-type Dept = 'followup' | 'hr' | 'settings';
+type Dept = 'personal' | 'followup' | 'hr' | 'settings';
 type NavItem = { view: string; label: string; roles: string[]; href: string; icon: ReactNode; dept: Dept };
 type NavSection = { label: string; items: NavItem[]; roles: string[] };
 
 // Department labels for the top-of-sidebar dropdown. Owner sees all
-// three; everyone else only sees a department if at least one item in
-// it is visible to them (driven by role + viewPerms).
+// departments; everyone else only sees a department if at least one
+// item in it is visible to them (driven by role + viewPerms). Personal
+// is the default landing for every user — every employee sees it.
 const DEPARTMENTS: { slug: Dept; label: string }[] = [
+  { slug: 'personal', label: 'Personal' },
   { slug: 'followup', label: 'Followup' },
   { slug: 'hr',       label: 'HR' },
   { slug: 'settings', label: 'Settings' },
 ];
 
 const SECTIONS: NavSection[] = [
+  // ─── PERSONAL department (default landing for every user) ─────
+  {
+    label: 'Me',
+    roles: ['owner', 'admin', 'cm', 'exec', 'analyst'],
+    items: [
+      { view: 'dashboard', label: 'Dashboard',  href: '/portal',         roles: ['owner','admin','cm','exec','analyst'], dept: 'personal', icon: <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg> },
+      { view: 'profile',   label: 'My Profile', href: '/portal/profile', roles: ['owner','admin','cm','exec','analyst'], dept: 'personal', icon: <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg> },
+    ],
+  },
+
   // ─── FOLLOWUP department (collections / accounts work) ────────
   {
     label: 'Operations',
     roles: ['owner', 'admin', 'cm', 'exec'],
     items: [
-      { view: 'dashboard',     label: 'Dashboard',      href: '/portal',               roles: ['owner','admin','cm','exec','analyst'], dept: 'followup', icon: <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg> },
-      { view: 'worklist',      label: 'My Worklist',    href: '/portal/worklist',      roles: ['owner','admin','cm','exec'],           dept: 'followup', icon: <svg viewBox="0 0 24 24"><path d="M9 11l3 3 8-8M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg> },
-      { view: 'team-worklist', label: 'Team Worklist',  href: '/portal/team-worklist', roles: ['owner','admin','cm'],                  dept: 'followup', icon: <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg> },
-      { view: 'hold-check',    label: 'Hold Check',     href: '/portal/hold-check',    roles: ['owner','admin','cm','exec'],           dept: 'followup', icon: <svg viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg> },
+      { view: 'followup-dashboard', label: 'Followup Dashboard', href: '/portal/followup',      roles: ['owner','admin','cm','exec','analyst'], dept: 'followup', icon: <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg> },
+      { view: 'worklist',           label: 'My Worklist',        href: '/portal/worklist',      roles: ['owner','admin','cm','exec'],           dept: 'followup', icon: <svg viewBox="0 0 24 24"><path d="M9 11l3 3 8-8M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg> },
+      { view: 'team-worklist',      label: 'Team Worklist',      href: '/portal/team-worklist', roles: ['owner','admin','cm'],                  dept: 'followup', icon: <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg> },
+      { view: 'hold-check',         label: 'Hold Check',         href: '/portal/hold-check',    roles: ['owner','admin','cm','exec'],           dept: 'followup', icon: <svg viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg> },
     ],
   },
   {
@@ -98,6 +110,11 @@ const VISHAL_ALLOWED_VIEWS = new Set(['insights', 'collections']);
 const VANSHIKA_HIDDEN_VIEWS = new Set(['worklist']);
 
 function canSee(item: NavItem, user: CurrentUser): boolean {
+  // Personal department is the default landing for every employee —
+  // Dashboard + My Profile are never gated by role overrides or
+  // viewPerms. Every user must always see their own page.
+  if (item.dept === 'personal') return true;
+
   // Owner always sees everything. viewPerms is meant for restricting
   // non-owner roles; the owner is the one who SETS those restrictions
   // so they should never be restricted themselves. This also keeps the
