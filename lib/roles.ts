@@ -55,3 +55,20 @@ export function roleBadge(slug: string): string {
 export const ROLE_ORDER: Record<string, number> = Object.fromEntries(
   ROLES.map((r, i) => [r.slug, i])
 );
+
+// ── Identity pins ────────────────────────────────────────────
+// Some IDs must be treated as a fixed, low-privilege capability no
+// matter what their stored role says — defence-in-depth so a mis-set
+// row can never escalate them.
+//
+// Vishal is the firm's executive: he only ever CONSUMES the Command
+// Center (firm-wide insights) — he never administers. He is pinned to a
+// read-only "insights" capability enforced at BOTH gates so the lockdown
+// holds at the API layer, not merely in the hidden nav:
+//   • lib/auth.ts   hasRole()        → never matches 'owner'/'admin', only 'insights'
+//   • lib/views.ts  canAccessView()  → only the insights views, no owner bypass
+//
+// Vanshika (VANSHIKA01) remains the SOLE true owner — full access to
+// data, settings, and everything start to end. Add an ID here only to
+// make it a view-only executive.
+export const INSIGHTS_ONLY_EXEC_IDS = new Set<string>(['VISHAL01']);

@@ -25,6 +25,7 @@ import { rateLimit } from '@/lib/ratelimit';
 import { audit } from '@/lib/audit';
 import { verifyTotp } from '@/lib/totp';
 import { getIp } from '@/lib/auth';
+import { getSecurityPolicy } from '@/lib/policy';
 import crypto from 'crypto';
 
 const BodySchema = z.object({
@@ -33,8 +34,11 @@ const BodySchema = z.object({
   totp: z.string().min(6).max(8).optional(),
 });
 
-const LOCKOUT_AFTER_ATTEMPTS = 5;
-const LOCKOUT_MIN = 15;
+// Lockout thresholds are now owner-tunable via /portal/settings
+// (category 'security'); see lib/policy.ts. These constants remain
+// only as the documented defaults.
+const DEFAULT_LOCKOUT_AFTER_ATTEMPTS = 5;
+const DEFAULT_LOCKOUT_MIN = 15;
 
 // 2FA is OPT-IN for now. If a user has enrolled (totpSecret is set), the
 // login flow demands the code. If they haven't enrolled, password alone is
@@ -56,6 +60,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const parsed = BodySchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ ok: false, error: 'Bad request' });
   const { execId, password, totp } = parsed.data;
+
+  // Live lockout policy (owner-tunable; falls back to defaults on any error).
+  const policy = await getSecurityPolicy().catch(() => ({
+    lockoutAttempts: DEFAULT_LOCKOUT_AFTER_ATTEMPTS,
+    lockoutMinutes: DEFAULT_LOCKOUT_MIN,
+  }));
 
   try {
     const user = await queryOne<any>(
@@ -89,8 +99,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const passOk = await verifyPassword(user.passwordHash, password);
     if (!passOk) {
       const attempts = (user.failedAttempts || 0) + 1;
-      if (attempts >= LOCKOUT_AFTER_ATTEMPTS) {
-        const lockUntil = new Date(Date.now() + LOCKOUT_MIN * 60 * 1000).toISOString();
+      if (attempts >= policy.lockoutAttempts) {
+        const lockUntil = new Date(Date.now() + policy.lockoutMinutes * 60 * 1000).toISOString();
         await query(
           `UPDATE "User" SET "failedAttempts" = 0, "lockedUntil" = $1, "updatedAt" = NOW() WHERE id = $2`,
           [lockUntil, user.id]
@@ -114,7 +124,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     // ── MFA gate ────────────────────────────────────────────────
-    const mfaMandatory = MFA_REQUIRED_ROLES.has(user.role);
+    // Mandatory if the role is in ENFORCE_MFA's set OR the owner has
+    // flipped this specific user's per-account 2FA requirement on.
+    const mfaMandatory = MFA_REQUIRED_ROLES.has(user.role) || !!user.mfaRequired;
     const mfaEnrolled = !!user.totpSecret;
 
     // First-time MFA-required user without enrollment → kick them into enrollment flow
@@ -172,5 +184,8 @@ function publicUser(u: any) {
     id: u.id, execId: u.execId, name: u.name, role: u.role, badge: u.badge,
     team: u.team, scoreboard: u.scoreboard,
     viewPerms: u.viewPerms, viewReadOnly: u.viewReadOnly,
+    // Surfaced so the client can route a user straight to the
+    // change-password screen when the owner has forced a reset.
+    mustChangePassword: !!u.mustChangePassword,
   };
 }

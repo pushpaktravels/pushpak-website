@@ -6,6 +6,7 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import { queryOne } from './pg';
 import { COOKIE_NAMES, readCookie } from './cookies';
 import { verifyAccessToken } from './jwt';
+import { INSIGHTS_ONLY_EXEC_IDS } from './roles';
 import type { User } from '@prisma/client';
 
 export type AuthedUser = User & { _mfaPassed: boolean };
@@ -45,6 +46,14 @@ export async function requireAuth(
 
 // Role gate — drop this in after requireAuth if an endpoint is owner-only etc.
 export function hasRole(user: AuthedUser, ...allowed: string[]): boolean {
+  // Insights-only identities (e.g. Vishal) are NEVER treated as owners or
+  // admins, even if their row says so. They pass a gate only when it admits
+  // the read-only 'insights' capability. This keeps owner-gated routes
+  // (users, audit, settings, uploads, holds, attendance…) closed to them at
+  // the API layer — not merely hidden in the nav. Vanshika stays a full owner.
+  if (INSIGHTS_ONLY_EXEC_IDS.has(user.execId)) {
+    return allowed.includes('insights');
+  }
   return allowed.includes(user.role);
 }
 

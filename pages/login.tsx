@@ -11,6 +11,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/router';
 import Head from 'next/head';
+import { INSIGHTS_ONLY_EXEC_IDS } from '../lib/roles';
 
 export default function Login() {
   const router = useRouter();
@@ -35,7 +36,12 @@ export default function Login() {
       if (!r.ok || !d.ok) throw new Error(d.error || 'Sign-in failed');
       if (d.enrollmentRequired) { setStep('enroll'); router.push('/2fa-enroll'); return; }
       if (d.needsTotp) { setStep('totp'); return; }
-      router.push('/portal');
+      // Insights-only execs (Vishal) land straight on the Command Center —
+      // that's the whole point of their login. Everyone else → personal dash.
+      const dest = INSIGHTS_ONLY_EXEC_IDS.has(execId.trim().toUpperCase())
+        ? '/portal/overview'
+        : '/portal';
+      router.push(dest);
     } catch (e: any) {
       setError(e.message);
     } finally {

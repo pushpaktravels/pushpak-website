@@ -47,8 +47,13 @@ function titleCase(key: string): string {
 // Long-form descriptions for individual settings (shown under the
 // key on each row). Falls back to nothing if not listed.
 const KEY_DESCRIPTIONS: Record<string, string> = {
-  SESSION_IDLE_MINUTES:  'Auto sign-out after this many minutes of inactivity (currently a fixed 30 min on the client).',
+  SESSION_IDLE_MINUTES:  'Auto sign-out after this many minutes of inactivity.',
   PII_MASK_ENABLED:      'Whether phone numbers / emails are masked in lists. (Currently always masked — reveal is per-field via audit.)',
+  PASSWORD_MIN_LENGTH:     'Minimum characters required for any password (new users and resets). Enforced server-side.',
+  PASSWORD_REQUIRE_MIXED:  'When "on", every password must include an uppercase letter, a lowercase letter, and a number. Accepts on / off.',
+  LOGIN_LOCKOUT_ATTEMPTS:  'Consecutive failed sign-ins before the account is temporarily locked.',
+  LOGIN_LOCKOUT_MINUTES:   'How long (in minutes) an account stays locked after hitting the attempt limit.',
+  PASSWORD_MAX_AGE_DAYS:   'Prompt a password change after this many days. 0 = never expire.',
   WA_TPL_GENTLE:           'Used by Send Reminder → Gentle reminder. Variables: {party} {outstanding} {owner} {days} {exec}',
   WA_TPL_FIRM:             'Used by Send Reminder → Firm reminder. Variables: {party} {outstanding} {owner} {days} {exec}',
   WA_TPL_LEGAL:            'Used by Send Reminder → Legal warning. Variables: {party} {outstanding} {owner} {days} {exec}',

@@ -13,9 +13,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AppShell } from '../../components/AppShell';
 import { useConfirm } from '../../components/ConfirmProvider';
-import { fmtRelative } from '../../lib/fmt';
+import { fmtRelative, fmtDateTime } from '../../lib/fmt';
 import { ROLES, ROLE_SLUGS, roleLabel, type RoleSlug } from '../../lib/roles';
-import { VIEWS } from '../../lib/views';
+import { VIEWS, canAccessView, canEditView } from '../../lib/views';
 
 type Role = RoleSlug;
 
@@ -28,8 +28,18 @@ type User = {
   viewPerms: string[] | null;
   viewReadOnly: string[] | null;
   totpEnrolledAt: string | null;
+  mfaRequired: boolean;
+  failedAttempts: number;
+  lockedUntil: string | null;
+  mustChangePassword: boolean;
+  passwordChangedAt: string | null;
   lastLoginAt: string | null;
+  lastLoginIp: string | null;
 };
+
+function isLocked(u: User): boolean {
+  return !!u.lockedUntil && new Date(u.lockedUntil) > new Date();
+}
 
 // View catalog now lives in lib/views.ts — the single source of truth
 // shared with the server-side access gate (canAccessView / requireView)
@@ -64,6 +74,7 @@ export default function UsersAuthPage() {
   const [users, setUsers] = useState<User[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [editTarget, setEditTarget] = useState<User | 'new' | null>(null);
+  const [tab, setTab] = useState<'roster' | 'matrix'>('roster');
   const confirm = useConfirm();
 
   function load() {
@@ -76,6 +87,36 @@ export default function UsersAuthPage() {
       .catch(e => setError(e.message));
   }
   useEffect(load, []);
+
+  // Fire-and-reload a single-field PATCH for imperative security actions.
+  async function patchUser(id: string, patch: Record<string, any>) {
+    try {
+      const r = await fetch('/api/users', {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ updates: [{ id, ...patch }] }),
+      }).then(x => x.json());
+      if (!r?.ok) throw new Error(r?.error || 'Failed');
+      load();
+    } catch (e: any) { setError(e.message); }
+  }
+
+  async function unlockUser(u: User) {
+    const ok = await confirm({
+      title: `Unlock ${u.name}?`,
+      body: `Clears the failed-attempt counter and removes the lockout so they can sign in again.`,
+      confirmLabel: 'Unlock',
+    });
+    if (ok) patchUser(u.id, { unlock: true });
+  }
+  async function resetMfa(u: User) {
+    const ok = await confirm({
+      title: `Reset 2FA for ${u.name}?`,
+      body: `Wipes their authenticator enrollment. They'll set up 2FA again on next sign-in${u.mfaRequired ? ' (2FA is required for this account)' : ''}.`,
+      confirmLabel: 'Reset 2FA',
+      destructive: true,
+    });
+    if (ok) patchUser(u.id, { resetMfa: true });
+  }
 
   async function deactivate(u: User) {
     const ok = await confirm({
@@ -140,7 +181,13 @@ export default function UsersAuthPage() {
 
       {error && <div style={{ padding: 12, marginBottom: 12, color: 'var(--rust)', fontSize: 12, background: 'rgba(181,72,61,.08)', borderRadius: 8 }}>Failed: {error}</div>}
 
-      {/* Table */}
+      {/* Tab switcher: roster vs. read-only access matrix */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+        <TabBtn active={tab === 'roster'} onClick={() => setTab('roster')}>Roster</TabBtn>
+        <TabBtn active={tab === 'matrix'} onClick={() => setTab('matrix')}>Access matrix</TabBtn>
+      </div>
+
+      {tab === 'roster' && (
       <div style={{
         background: '#fff', border: '1px solid var(--line, #e7eaf0)',
         borderRadius: 14, overflow: 'hidden',
@@ -151,6 +198,7 @@ export default function UsersAuthPage() {
               <Th>Name</Th>
               <Th>Executive ID</Th>
               <Th>Role</Th>
+              <Th align="center">Security</Th>
               <Th align="center">Scoreboard</Th>
               <Th align="center">Visible Views</Th>
               <Th align="right">Actions</Th>
@@ -159,6 +207,7 @@ export default function UsersAuthPage() {
           <tbody>
             {users.map(u => {
               const meta = ROLE_META[u.role] || ROLE_NEUTRAL;
+              const locked = isLocked(u);
               return (
                 <tr key={u.id} style={{
                   borderBottom: '1px solid var(--line, #e7eaf0)',
@@ -166,6 +215,9 @@ export default function UsersAuthPage() {
                 }}>
                   <Td>
                     <strong style={{ color: 'var(--navy-deep)', fontSize: 14 }}>{u.name}</strong>
+                    <div style={{ fontSize: 10.5, color: 'var(--t-3)', marginTop: 2 }}>
+                      {u.lastLoginAt ? `Last in ${fmtRelative(u.lastLoginAt)}` : 'Never signed in'}
+                    </div>
                   </Td>
                   <Td><span style={{ fontFamily: "inherit", fontSize: 12, color: 'var(--t-2)' }}>{u.execId}</span></Td>
                   <Td>
@@ -177,6 +229,14 @@ export default function UsersAuthPage() {
                     }}>{roleLabel(u.role)}</span>
                   </Td>
                   <Td align="center">
+                    <div style={{ display: 'inline-flex', gap: 5, flexWrap: 'wrap', justifyContent: 'center' }}>
+                      {locked && <SecChip tone="rust">Locked</SecChip>}
+                      {u.totpEnrolledAt ? <SecChip tone="sage">2FA</SecChip> : (u.mfaRequired && <SecChip tone="gold">2FA req</SecChip>)}
+                      {u.mustChangePassword && <SecChip tone="gold">Pwd reset</SecChip>}
+                      {!locked && !u.totpEnrolledAt && !u.mfaRequired && !u.mustChangePassword && <span style={{ color: 'var(--t-3)', fontSize: 12 }}>—</span>}
+                    </div>
+                  </Td>
+                  <Td align="center">
                     <Toggle on={u.scoreboard} onChange={v => toggleScoreboard(u, v)} disabled={!u.active} />
                   </Td>
                   <Td align="center">
@@ -186,6 +246,7 @@ export default function UsersAuthPage() {
                   </Td>
                   <Td align="right">
                     <div style={{ display: 'inline-flex', gap: 8 }}>
+                      {locked && <RowBtn onClick={() => unlockUser(u)}>Unlock</RowBtn>}
                       <RowBtn onClick={() => setEditTarget(u)}>Edit</RowBtn>
                       {u.active
                         ? <RowBtn onClick={() => deactivate(u)}>Deactivate</RowBtn>
@@ -198,6 +259,9 @@ export default function UsersAuthPage() {
           </tbody>
         </table>
       </div>
+      )}
+
+      {tab === 'matrix' && <AccessMatrix users={users} />}
 
       {editTarget && (
         <UserEditModal
@@ -205,6 +269,8 @@ export default function UsersAuthPage() {
           user={editTarget === 'new' ? null : editTarget}
           onClose={() => setEditTarget(null)}
           onSaved={() => { setEditTarget(null); load(); }}
+          onUnlock={unlockUser}
+          onResetMfa={resetMfa}
         />
       )}
     </AppShell>
@@ -213,18 +279,24 @@ export default function UsersAuthPage() {
 
 // ─── User edit / create modal ────────────────────────────────
 function UserEditModal({
-  mode, user, onClose, onSaved,
+  mode, user, onClose, onSaved, onUnlock, onResetMfa,
 }: {
   mode: 'edit' | 'create';
   user: User | null;
   onClose: () => void;
   onSaved: () => void;
+  onUnlock: (u: User) => void;
+  onResetMfa: (u: User) => void;
 }) {
   const [name, setName] = useState(user?.name || '');
   const [execId, setExecId] = useState(user?.execId || '');
   const [role, setRole] = useState<Role>(user?.role || 'accounts');
   const [password, setPassword] = useState('');
   const [scoreboard, setScoreboard] = useState(user?.scoreboard ?? false);
+  const [mfaRequired, setMfaRequired] = useState(user?.mfaRequired ?? false);
+  const [forceChange, setForceChange] = useState(user?.mustChangePassword ?? false);
+  const [history, setHistory] = useState<{ ts: string; action: string; ip: string | null }[] | null>(null);
+  const [showHistory, setShowHistory] = useState(false);
 
   // Permissions: visible (in viewPerms) + readonly (in viewReadOnly).
   // For existing users, hydrate from their stored perms or fall back to role defaults.
@@ -275,6 +347,7 @@ function UserEditModal({
           body: JSON.stringify({
             name, execId, role, password,
             scoreboard, viewPerms, viewReadOnly,
+            mfaRequired, mustChangePassword: forceChange,
           }),
         }).then(x => x.json());
         if (!r?.ok) throw new Error(r?.error || 'Failed to create');
@@ -283,7 +356,12 @@ function UserEditModal({
           id: user!.id,
           name, role, scoreboard,
           viewPerms, viewReadOnly,
+          mfaRequired,
         };
+        // Only send mustChangePassword if it actually changed — a
+        // password reset clears the flag server-side, so we avoid
+        // re-arming it on save.
+        if (forceChange !== (user!.mustChangePassword ?? false)) update.mustChangePassword = forceChange;
         if (password) update.password = password;
         const r = await fetch('/api/users', {
           method: 'PATCH', headers: { 'Content-Type': 'application/json' },
@@ -294,6 +372,17 @@ function UserEditModal({
       onSaved();
     } catch (e: any) { setErr(e.message); setSaving(false); }
   }
+
+  async function loadHistory() {
+    setShowHistory(s => !s);
+    if (history || !user) return;
+    try {
+      const r = await fetch(`/api/users/login-history?execId=${encodeURIComponent(user.execId)}`).then(x => x.json());
+      if (r?.ok) setHistory(r.data.events || []);
+    } catch { /* non-fatal */ }
+  }
+
+  const locked = user ? (!!user.lockedUntil && new Date(user.lockedUntil) > new Date()) : false;
 
   return (
     <>
@@ -352,6 +441,80 @@ function UserEditModal({
             </div>
             <Toggle on={scoreboard} onChange={setScoreboard} />
           </div>
+
+          <hr style={{ border: 'none', borderTop: '1px solid var(--line, #e7eaf0)', margin: '22px 0 18px' }} />
+
+          {/* Account security */}
+          <SectionLabel>Account security</SectionLabel>
+
+          {mode === 'edit' && user && (
+            <div style={{
+              display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10,
+              padding: '12px 14px', background: 'var(--bg-2, #f6f8fb)', borderRadius: 8,
+              fontSize: 12, color: 'var(--t-2)', marginBottom: 12,
+            }}>
+              <div><span style={{ color: 'var(--t-3)' }}>Last sign-in</span><br />
+                <strong style={{ color: 'var(--navy-deep)' }}>{user.lastLoginAt ? fmtDateTime(user.lastLoginAt) : 'Never'}</strong>
+                {user.lastLoginIp && <span style={{ color: 'var(--t-3)' }}> · {user.lastLoginIp}</span>}
+              </div>
+              <div><span style={{ color: 'var(--t-3)' }}>Password changed</span><br />
+                <strong style={{ color: 'var(--navy-deep)' }}>{user.passwordChangedAt ? fmtDateTime(user.passwordChangedAt) : '—'}</strong>
+              </div>
+              <div><span style={{ color: 'var(--t-3)' }}>2FA</span><br />
+                <strong style={{ color: user.totpEnrolledAt ? 'var(--sage)' : 'var(--t-2)' }}>{user.totpEnrolledAt ? 'Enrolled' : 'Not set up'}</strong>
+              </div>
+              <div><span style={{ color: 'var(--t-3)' }}>Lockout</span><br />
+                <strong style={{ color: locked ? 'var(--rust)' : 'var(--t-2)' }}>
+                  {locked ? `Locked until ${fmtDateTime(user.lockedUntil)}` : `${user.failedAttempts || 0} failed attempt${(user.failedAttempts || 0) === 1 ? '' : 's'}`}
+                </strong>
+              </div>
+            </div>
+          )}
+
+          {/* Per-user toggles (apply on Save) */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 14px', background: 'var(--bg-2, #f6f8fb)', borderRadius: 8 }}>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--navy-deep)' }}>Require 2FA</div>
+                <div style={{ fontSize: 11, color: 'var(--t-3)' }}>Force this user to use an authenticator app to sign in</div>
+              </div>
+              <Toggle on={mfaRequired} onChange={setMfaRequired} />
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 14px', background: 'var(--bg-2, #f6f8fb)', borderRadius: 8 }}>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--navy-deep)' }}>Force password change</div>
+                <div style={{ fontSize: 11, color: 'var(--t-3)' }}>Make them set a new password at next sign-in</div>
+              </div>
+              <Toggle on={forceChange} onChange={setForceChange} />
+            </div>
+          </div>
+
+          {/* Imperative actions (edit mode only) */}
+          {mode === 'edit' && user && (
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
+              {locked && <PermBtn onClick={() => onUnlock(user)}>UNLOCK ACCOUNT</PermBtn>}
+              {user.totpEnrolledAt && <PermBtn onClick={() => onResetMfa(user)}>RESET 2FA</PermBtn>}
+              <PermBtn onClick={loadHistory}>{showHistory ? 'HIDE LOGIN HISTORY' : 'LOGIN HISTORY'}</PermBtn>
+            </div>
+          )}
+
+          {showHistory && (
+            <div style={{ marginTop: 8, border: '1px solid var(--line, #e7eaf0)', borderRadius: 8, overflow: 'hidden' }}>
+              {history === null && <div style={{ padding: 12, fontSize: 12, color: 'var(--t-3)' }}>Loading…</div>}
+              {history && history.length === 0 && <div style={{ padding: 12, fontSize: 12, color: 'var(--t-3)' }}>No recorded events.</div>}
+              {history && history.map((h, i) => (
+                <div key={i} style={{
+                  display: 'flex', justifyContent: 'space-between', gap: 10,
+                  padding: '8px 12px', fontSize: 11.5,
+                  borderBottom: i === history.length - 1 ? 'none' : '1px solid var(--line, #e7eaf0)',
+                }}>
+                  <span style={{ fontWeight: 600, color: h.action === 'LOGIN_OK' ? 'var(--sage)' : h.action === 'LOGIN_FAIL' ? 'var(--rust)' : 'var(--navy-deep)' }}>{h.action}</span>
+                  <span style={{ color: 'var(--t-2)', flex: 1, textAlign: 'center' }}>{h.ip || ''}</span>
+                  <span style={{ color: 'var(--t-3)' }}>{fmtDateTime(h.ts)}</span>
+                </div>
+              ))}
+            </div>
+          )}
 
           <hr style={{ border: 'none', borderTop: '1px solid var(--line, #e7eaf0)', margin: '22px 0 18px' }} />
 
@@ -434,7 +597,85 @@ function UserEditModal({
   );
 }
 
+// ─── Access matrix (read-only "who can see/edit what") ─────────
+function AccessMatrix({ users }: { users: User[] }) {
+  const active = users.filter(u => u.active);
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: 18, marginBottom: 10, fontSize: 11.5, color: 'var(--t-2)' }}>
+        <span><span style={{ color: 'var(--sage)', fontWeight: 800 }}>●</span> Full access</span>
+        <span><span style={{ color: 'var(--gold, #c9a64b)', fontWeight: 800 }}>◐</span> View-only</span>
+        <span><span style={{ color: 'var(--t-3)', fontWeight: 800 }}>·</span> No access</span>
+      </div>
+      <div style={{ background: '#fff', border: '1px solid var(--line, #e7eaf0)', borderRadius: 14, overflow: 'auto' }}>
+        <table style={{ borderCollapse: 'collapse', fontSize: 12 }}>
+          <thead>
+            <tr style={{ background: 'var(--bg-2, #f6f8fb)' }}>
+              <th style={{
+                position: 'sticky', left: 0, zIndex: 2, background: 'var(--bg-2, #f6f8fb)',
+                textAlign: 'left', padding: '10px 14px', fontSize: 10, letterSpacing: '.16em',
+                textTransform: 'uppercase', color: 'var(--t-3)', fontWeight: 700, minWidth: 160,
+              }}>User</th>
+              {VIEWS.map(v => (
+                <th key={v.key} style={{ padding: '8px 4px', verticalAlign: 'bottom', height: 120 }}>
+                  <div style={{
+                    writingMode: 'vertical-rl', transform: 'rotate(180deg)',
+                    whiteSpace: 'nowrap', fontSize: 10.5, color: 'var(--t-2)', fontWeight: 600,
+                    margin: '0 auto',
+                  }}>{v.label}</div>
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {active.map(u => (
+              <tr key={u.id} style={{ borderTop: '1px solid var(--line, #e7eaf0)' }}>
+                <td style={{
+                  position: 'sticky', left: 0, zIndex: 1, background: '#fff',
+                  padding: '8px 14px', borderRight: '1px solid var(--line, #e7eaf0)',
+                }}>
+                  <strong style={{ color: 'var(--navy-deep)' }}>{u.name}</strong>
+                  <div style={{ fontSize: 10, color: 'var(--t-3)' }}>{roleLabel(u.role)}</div>
+                </td>
+                {VIEWS.map(v => {
+                  const see = canAccessView(u, v.key);
+                  const edit = see && canEditView(u, v.key);
+                  const mark = !see ? '·' : edit ? '●' : '◐';
+                  const color = !see ? 'var(--t-3)' : edit ? 'var(--sage)' : 'var(--gold, #c9a64b)';
+                  return (
+                    <td key={v.key} style={{ textAlign: 'center', padding: '8px 4px' }}>
+                      <span title={`${v.label}: ${!see ? 'no access' : edit ? 'full access' : 'view-only'}`}
+                            style={{ color, fontWeight: 800 }}>{mark}</span>
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 // ─── Bits ────────────────────────────────────────────────────
+function TabBtn({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button onClick={onClick} style={{
+      background: active ? 'var(--navy-deep)' : 'transparent',
+      color: active ? '#fff' : 'var(--t-2)',
+      border: active ? '1px solid var(--navy-deep)' : '1px solid var(--line, #e7eaf0)',
+      borderRadius: 8, padding: '8px 16px', fontSize: 12, fontWeight: 700,
+      letterSpacing: '.06em', cursor: 'pointer',
+    }}>{children}</button>
+  );
+}
+function SecChip({ tone, children }: { tone: 'rust' | 'sage' | 'gold'; children: React.ReactNode }) {
+  const c = tone === 'rust' ? { bg: 'rgba(181,72,61,.12)', fg: '#B5483D' }
+    : tone === 'sage' ? { bg: 'rgba(46,125,92,.14)', fg: '#2E7D5C' }
+    : { bg: 'rgba(201,166,75,.16)', fg: '#7F6000' };
+  return <span style={{ background: c.bg, color: c.fg, padding: '2px 7px', borderRadius: 4, fontSize: 9.5, fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase' }}>{children}</span>;
+}
 function Th({ children, align }: { children: React.ReactNode; align?: 'left' | 'right' | 'center' }) {
   return <th style={{ textAlign: align || 'left', padding: '12px 18px', fontSize: 10, letterSpacing: '.22em', textTransform: 'uppercase', color: 'var(--t-3)', fontWeight: 700 }}>{children}</th>;
 }

@@ -14,6 +14,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       id: user.id, execId: user.execId, name: user.name, role: user.role, badge: user.badge,
       team: user.team, scoreboard: user.scoreboard,
       viewPerms: user.viewPerms, viewReadOnly: user.viewReadOnly,
+      // So the shell can force a password change before letting the
+      // user do anything else (set by the owner in Users & Authorities).
+      mustChangePassword: !!(user as any).mustChangePassword,
     },
   });
 }

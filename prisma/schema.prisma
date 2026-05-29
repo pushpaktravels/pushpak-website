@@ -37,9 +37,13 @@ model User {
   // 2FA (TOTP)
   totpSecret     String? // base32 encoded; null if 2FA not enrolled yet
   totpEnrolledAt DateTime?
+  mfaRequired    Boolean   @default(false) // per-user 2FA mandate (independent of the ENFORCE_MFA env switch)
   // Brute-force lockout
   failedAttempts Int       @default(0)
   lockedUntil    DateTime?
+  // Password lifecycle
+  mustChangePassword Boolean   @default(false) // force a change at next sign-in
+  passwordChangedAt  DateTime?
   // Audit
   lastLoginAt    DateTime?
   lastLoginIp    String?

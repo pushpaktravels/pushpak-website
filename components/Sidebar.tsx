@@ -5,6 +5,8 @@
 import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { INSIGHTS_ONLY_EXEC_IDS } from '../lib/roles';
+import { INSIGHTS_ONLY_VIEWS } from '../lib/views';
 
 export type CurrentUser = {
   id: string;
@@ -13,9 +15,11 @@ export type CurrentUser = {
   role: string;
   badge: string;
   viewPerms?: string[] | null;
+  viewReadOnly?: string[] | null;
+  mustChangePassword?: boolean;
 };
 
-type Dept = 'personal' | 'followup' | 'hr' | 'settings';
+type Dept = 'command' | 'personal' | 'followup' | 'hr' | 'settings';
 type NavItem = { view: string; label: string; roles: string[]; href: string; icon: ReactNode; dept: Dept };
 type NavSection = { label: string; items: NavItem[]; roles: string[] };
 
@@ -24,6 +28,7 @@ type NavSection = { label: string; items: NavItem[]; roles: string[] };
 // item in it is visible to them (driven by role + viewPerms). Personal
 // is the default landing for every user — every employee sees it.
 const DEPARTMENTS: { slug: Dept; label: string }[] = [
+  { slug: 'command',  label: 'Command Center' },
   { slug: 'personal', label: 'Personal' },
   { slug: 'followup', label: 'Followup' },
   { slug: 'hr',       label: 'HR' },
@@ -31,6 +36,15 @@ const DEPARTMENTS: { slug: Dept; label: string }[] = [
 ];
 
 const SECTIONS: NavSection[] = [
+  // ─── COMMAND CENTER (owner-only executive overview) ───────────
+  {
+    label: 'Executive',
+    roles: ['owner'],
+    items: [
+      { view: 'overview', label: 'Command Center', href: '/portal/overview', roles: ['owner'], dept: 'command', icon: <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M12 12l5-3"/></svg> },
+    ],
+  },
+
   // ─── PERSONAL department (default landing for every user) ─────
   {
     label: 'Me',
@@ -105,15 +119,19 @@ const SECTIONS: NavSection[] = [
   },
 ];
 
-// Per-ID overrides on top of the role-based defaults.
-const VISHAL_ALLOWED_VIEWS = new Set(['insights', 'collections']);
-const VANSHIKA_HIDDEN_VIEWS = new Set(['worklist']);
-
 function canSee(item: NavItem, user: CurrentUser): boolean {
   // Personal department is the default landing for every employee —
   // Dashboard + My Profile are never gated by role overrides or
   // viewPerms. Every user must always see their own page.
   if (item.dept === 'personal') return true;
+
+  // Insights-only identities (e.g. Vishal) see ONLY their pinned views —
+  // checked BEFORE the owner bypass so it holds even if their row says
+  // 'owner'. Mirrors lib/views.ts canAccessView exactly. Vishal logs in to
+  // see the Command Center (firm overview); everything else stays hidden.
+  if (INSIGHTS_ONLY_EXEC_IDS.has(user.execId)) {
+    return INSIGHTS_ONLY_VIEWS.has(item.view);
+  }
 
   // Owner always sees everything. viewPerms is meant for restricting
   // non-owner roles; the owner is the one who SETS those restrictions
@@ -129,8 +147,6 @@ function canSee(item: NavItem, user: CurrentUser): boolean {
     return user.viewPerms.includes(item.view);
   }
   if (!item.roles.includes(user.role)) return false;
-  if (user.execId === 'VISHAL01')   return VISHAL_ALLOWED_VIEWS.has(item.view);
-  if (user.execId === 'VANSHIKA01') return !VANSHIKA_HIDDEN_VIEWS.has(item.view);
   return true;
 }
 

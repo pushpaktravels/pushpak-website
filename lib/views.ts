@@ -33,14 +33,25 @@
 // or those users could read clients' financials & PII.
 // ============================================================
 import type { NextApiResponse } from 'next';
-import { ROLE_SLUGS } from './roles';
+import { ROLE_SLUGS, INSIGHTS_ONLY_EXEC_IDS } from './roles';
 
 export type ViewRow = { key: string; label: string; roles: string[] };
+
+// Views an "insights-only" identity (e.g. Vishal) may reach. The Command
+// Center IS the firm overview — financials + workforce + attendance +
+// per-department / per-employee performance, all in one page — so that
+// single view satisfies "log in to see the overview of the firm". Keep
+// this in lock-step with components/Sidebar.tsx (it imports this set).
+export const INSIGHTS_ONLY_VIEWS = new Set<string>(['overview']);
 
 export const VIEWS: ViewRow[] = [
   // Personal — every role, every user (also bypassed in the Sidebar).
   { key: 'dashboard',           label: 'Dashboard',           roles: [...ROLE_SLUGS] },
   { key: 'profile',             label: 'My Profile',          roles: [...ROLE_SLUGS] },
+  // Command Center — the owner's company-wide executive overview
+  // (financials + workforce + attendance + team performance). Owners
+  // only by default; grantable to others via viewPerms.
+  { key: 'overview',            label: 'Command Center',      roles: ['owner'] },
   // Followup / Accounts module.
   { key: 'followup-dashboard',  label: 'Followup Dashboard',  roles: ['owner', 'admin', 'cm-accounts', 'accounts', 'insights'] },
   { key: 'worklist',            label: 'My Worklist',         roles: ['owner', 'admin', 'cm-accounts', 'accounts'] },
@@ -73,10 +84,16 @@ const VIEW_BY_KEY = new Map(VIEWS.map(v => [v.key, v]));
 
 // Minimal shape so callers can pass an AuthedUser, a User row, or a
 // plain object without coupling this module to Prisma types.
-type ViewUser = { role: string; viewPerms?: string[] | null };
+type ViewUser = { execId?: string | null; role: string; viewPerms?: string[] | null; viewReadOnly?: string[] | null };
 
 export function canAccessView(user: ViewUser, key: string): boolean {
   if (!user) return false;
+  // Insights-only identities (e.g. Vishal) are pinned to a fixed whitelist
+  // and NEVER get the owner bypass below — even if their row says 'owner'.
+  if (user.execId && INSIGHTS_ONLY_EXEC_IDS.has(user.execId)) {
+    if (key === 'dashboard' || key === 'profile') return true;  // personal
+    return INSIGHTS_ONLY_VIEWS.has(key);
+  }
   if (user.role === 'owner') return true;            // root of trust
   const v = VIEW_BY_KEY.get(key);
   if (!v) return false;                              // unknown view → deny
@@ -101,5 +118,38 @@ export function requireView(
 ): boolean {
   if (canAccessView(user, key)) return true;
   res.status(403).json({ ok: false, error: 'Not allowed for your role' });
+  return false;
+}
+
+// Can this user MUTATE within a view, or only look? "View-only" is the
+// finer half of access control: the owner can grant a user sight of a
+// sheet (viewPerms) while forbidding edits (viewReadOnly). Read-only is
+// per-user — it has no role default — so it only ever NARROWS access.
+export function canEditView(user: ViewUser, key: string): boolean {
+  if (!user) return false;
+  // Insights-only identities (e.g. Vishal) are pure spectators: they may
+  // edit only their own personal pages, never any data view.
+  if (user.execId && INSIGHTS_ONLY_EXEC_IDS.has(user.execId)) {
+    return key === 'dashboard' || key === 'profile';
+  }
+  if (user.role === 'owner') return true;            // root of trust
+  if (!canAccessView(user, key)) return false;       // can't see → can't edit
+  // Personal views are always editable by their owner.
+  if (key === 'dashboard' || key === 'profile') return true;
+  // An explicit per-user read-only flag forbids mutations.
+  if (user.viewReadOnly && user.viewReadOnly.includes(key)) return false;
+  return true;
+}
+
+// Drop-in gate for MUTATING handlers (POST / PATCH / DELETE). Sends 403
+// when the caller can see the view but has been marked view-only.
+//   if (req.method !== 'GET' && !requireViewEdit(user, res, 'worklist')) return;
+export function requireViewEdit(
+  user: ViewUser,
+  res: NextApiResponse,
+  key: string,
+): boolean {
+  if (canEditView(user, key)) return true;
+  res.status(403).json({ ok: false, error: 'View-only: you cannot make changes here' });
   return false;
 }

@@ -121,6 +121,20 @@ export function AppShell({
   );
   if (!user) return <BrandedLoader />;
 
+  // Hard gate: a user the owner has flagged for a password reset can't
+  // reach any page until they set a new one. Blocks the whole shell.
+  if (user.mustChangePassword) {
+    return (
+      <ForcePasswordChange
+        onDone={() => {
+          const updated = { ...user, mustChangePassword: false };
+          setUser(updated);
+          try { sessionStorage.setItem(USER_CACHE_KEY, JSON.stringify(updated)); } catch {}
+        }}
+      />
+    );
+  }
+
   return (
     <>
       <Head><title>{title} · Pushpak Portal</title></Head>
@@ -131,6 +145,78 @@ export function AppShell({
       </div>
     </>
   );
+}
+
+// ─── Mandatory password change screen ────────────────────────
+// Shown full-screen when the owner has set mustChangePassword. There
+// is no way past it except a successful change (or signing out).
+function ForcePasswordChange({ onDone }: { onDone: () => void }) {
+  const router = useRouter();
+  const [current, setCurrent] = useState('');
+  const [next, setNext] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setErr(null);
+    if (next !== confirm) { setErr('New passwords do not match.'); return; }
+    setBusy(true);
+    try {
+      const r = await fetch('/api/me/change-password', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ currentPassword: current, newPassword: next }),
+      }).then(x => x.json());
+      if (!r?.ok) throw new Error(r?.error || 'Could not change password');
+      onDone();
+    } catch (e: any) { setErr(e.message); setBusy(false); }
+  }
+
+  return (
+    <main style={{
+      minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
+      background: 'var(--bg-2, #f6f8fb)', padding: 20,
+    }}>
+      <form onSubmit={submit} style={{
+        width: 'min(420px, 94vw)', background: '#fff', borderRadius: 14,
+        border: '1px solid var(--line, #e7eaf0)', boxShadow: '0 20px 60px rgba(8,24,58,.18)',
+        padding: 28,
+      }}>
+        <h2 style={{ fontSize: 18, fontWeight: 700, color: 'var(--navy-deep)', margin: '0 0 6px' }}>Set a new password</h2>
+        <p style={{ fontSize: 13, color: 'var(--t-2)', margin: '0 0 20px', lineHeight: 1.5 }}>
+          For security, an administrator has asked you to choose a new password before continuing.
+        </p>
+        <Lbl>Current password</Lbl>
+        <input type="password" value={current} onChange={e => setCurrent(e.target.value)} autoFocus style={fcInput} />
+        <Lbl>New password</Lbl>
+        <input type="password" value={next} onChange={e => setNext(e.target.value)} style={fcInput} />
+        <Lbl>Confirm new password</Lbl>
+        <input type="password" value={confirm} onChange={e => setConfirm(e.target.value)} style={fcInput} />
+        {err && <div style={{ color: 'var(--rust)', fontSize: 12.5, margin: '4px 0 12px' }}>{err}</div>}
+        <button type="submit" disabled={busy || !current || !next} style={{
+          width: '100%', background: 'var(--navy-deep)', color: '#fff', border: 'none',
+          borderRadius: 8, padding: '12px', fontSize: 13, fontWeight: 700, letterSpacing: '.08em',
+          cursor: busy ? 'not-allowed' : 'pointer', opacity: busy ? 0.7 : 1, marginTop: 6,
+        }}>{busy ? 'SAVING…' : 'SET PASSWORD & CONTINUE'}</button>
+        <button type="button" onClick={() => {
+          sessionStorage.removeItem(USER_CACHE_KEY);
+          fetch('/api/logout', { method: 'POST' }).finally(() => router.replace('/login'));
+        }} style={{
+          width: '100%', background: 'transparent', color: 'var(--t-2)', border: 'none',
+          padding: '10px', fontSize: 12, cursor: 'pointer', marginTop: 8,
+        }}>Sign out instead</button>
+      </form>
+    </main>
+  );
+}
+const fcInput: React.CSSProperties = {
+  width: '100%', fontSize: 14, padding: '10px 12px', marginBottom: 14,
+  border: '1px solid var(--line, #e7eaf0)', borderRadius: 8,
+  outline: 'none', color: 'var(--navy-deep)', boxSizing: 'border-box',
+};
+function Lbl({ children }: { children: React.ReactNode }) {
+  return <div style={{ fontSize: 10, letterSpacing: '.18em', textTransform: 'uppercase', color: 'var(--t-3)', fontWeight: 700, marginBottom: 6 }}>{children}</div>;
 }
 
 // Scrollable main with a floating "back to top" button that appears
