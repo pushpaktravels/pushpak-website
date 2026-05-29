@@ -176,10 +176,15 @@ export function Sidebar({ user }: { user: CurrentUser }) {
   );
 
   const [selectedDept, setSelectedDept] = useState<Dept>(() => {
-    // SSR-safe: default to the available department on the server
-    // (no sessionStorage available). The client effect below will
-    // sync to the saved value or the current page's department.
-    return availableDepts[0]?.slug || 'followup';
+    // Start on the CURRENT page's department from the very first render
+    // (router.pathname is SSR-safe, so server + client agree — no
+    // hydration mismatch). This matters for scroll restoration below:
+    // if we defaulted to availableDepts[0] (e.g. 'command' for the owner,
+    // a 1-item list) the saved scroll offset would clamp to 0 against the
+    // short list before the department synced to the real, taller one —
+    // making the sidebar jump back to the top on every navigation. The
+    // effects below still handle the no-current-item case via DEPT_KEY.
+    return currentItem?.dept || availableDepts[0]?.slug || 'followup';
   });
 
   // Initial sync: prefer the current page's department, fall back to
@@ -218,15 +223,24 @@ export function Sidebar({ user }: { user: CurrentUser }) {
     .map(s => ({ ...s, items: s.items.filter(i => i.dept === selectedDept && canSee(i, user)) }))
     .filter(s => s.items.length > 0);
 
-  // Restore the saved scroll position on mount.
+  // Restore the saved scroll position — but only ONCE, and only after the
+  // department (hence the nav's real height) has settled. Depending on
+  // selectedDept means that if an effect flips the department after mount,
+  // we retry the restore against the correct list height; the ref guard
+  // stops it from fighting the user once they start scrolling or switch
+  // departments manually.
+  const navScrollRestored = useRef(false);
   useEffect(() => {
     const el = navRef.current;
-    if (!el) return;
+    if (!el || navScrollRestored.current) return;
     try {
       const saved = sessionStorage.getItem(NAV_SCROLL_KEY);
-      if (saved) el.scrollTop = parseInt(saved, 10) || 0;
+      if (saved != null) {
+        el.scrollTop = parseInt(saved, 10) || 0;
+        navScrollRestored.current = true;
+      }
     } catch {}
-  }, []);
+  }, [selectedDept]);
 
   function handleNavScroll() {
     const el = navRef.current;
