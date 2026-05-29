@@ -189,7 +189,10 @@ input,select,textarea{font-family:inherit;color:inherit}
 
 /* ─── KPI CARDS ─────────────────────────────────────────── */
 .dash-row{display:grid;gap:20px}
-.dash-row.four{grid-template-columns:repeat(4,1fr)}
+/* Hero card (first cell) gets ~1.4× the width of each of the other three
+   so the long ₹X,XX,XX,XXX number has breathing room and the smaller
+   stat cards stay compact. Reverts to 1:1 on mobile via the @media block. */
+.dash-row.four{grid-template-columns:1.4fr 1fr 1fr 1fr}
 .dash-row.three{grid-template-columns:repeat(3,1fr)}
 .dash-row.two{grid-template-columns:1fr 1fr}
 .kpi{
