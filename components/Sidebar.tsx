@@ -4,7 +4,7 @@
 // ============================================================
 import Link from 'next/link';
 import { useRouter } from 'next/router';
-import type { ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 
 export type CurrentUser = {
   id: string;
@@ -102,11 +102,39 @@ function canSee(item: NavItem, user: CurrentUser): boolean {
   return true;
 }
 
+// Persist sidebar scroll position across page navigations. Without
+// this the .sidebar-nav scrolls back to the top every time the user
+// clicks a link, which is annoying when the link they're aiming at
+// lives near the bottom (Audit Log / Permissions / Settings).
+// We use sessionStorage so the scroll survives in-tab navigation but
+// resets cleanly on a fresh login.
+const NAV_SCROLL_KEY = 'pushpak:nav-scroll';
+
 export function Sidebar({ user }: { user: CurrentUser }) {
   const router = useRouter();
+  const navRef = useRef<HTMLElement | null>(null);
   const sections = SECTIONS
     .map(s => ({ ...s, items: s.items.filter(i => canSee(i, user)) }))
     .filter(s => s.items.length > 0);
+
+  // Restore the saved scroll position on mount. Synchronous via
+  // useLayoutEffect-equivalent timing isn't needed — the browser
+  // hasn't painted yet on first effect tick, so the user never sees
+  // the brief 0-scroll flash.
+  useEffect(() => {
+    const el = navRef.current;
+    if (!el) return;
+    try {
+      const saved = sessionStorage.getItem(NAV_SCROLL_KEY);
+      if (saved) el.scrollTop = parseInt(saved, 10) || 0;
+    } catch { /* sessionStorage disabled — no-op */ }
+  }, []);
+
+  function handleNavScroll() {
+    const el = navRef.current;
+    if (!el) return;
+    try { sessionStorage.setItem(NAV_SCROLL_KEY, String(el.scrollTop)); } catch {}
+  }
 
   return (
     <aside className="sidebar">
@@ -125,7 +153,7 @@ export function Sidebar({ user }: { user: CurrentUser }) {
           </div>
         </div>
       </div>
-      <nav className="sidebar-nav scroll">
+      <nav ref={navRef} className="sidebar-nav scroll" onScroll={handleNavScroll}>
         {sections.map(section => (
           <div key={section.label} className="nav-section">
             <span className="nav-section-label">{section.label}</span>
