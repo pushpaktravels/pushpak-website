@@ -188,49 +188,15 @@ export default function HoldCheckPage() {
         </div>
       </div>
 
-      {/* Hold boards (always shown below the search bar) */}
-      {holdsError && (
-        <div style={{ color: 'var(--rust)', padding: 12, marginBottom: 12, fontSize: 13 }}>
-          Failed to load holds: {holdsError}
-        </div>
-      )}
-      <HoldBoard
-        title="Hold candidates"
-        subtitle="Flagged by execs — pending owner / CM approval"
-        accent="amber"
-        rows={candidateSort.sort(candidates)}
-        loading={holdsLoading}
-        actingId={actingId}
-        onOpen={setOpenId}
-        sortKey={candidateSort.key} sortDir={candidateSort.dir} onSort={candidateSort.toggle}
-        actions={(r) => (
-          <>
-            <BoardBtn variant="approve" onClick={() => changeHold(r.id, 'Active')}>Approve</BoardBtn>
-            <BoardBtn variant="release" onClick={() => changeHold(r.id, 'Released')}>Drop</BoardBtn>
-          </>
-        )}
-      />
-      <HoldBoard
-        title="On hold"
-        subtitle="Bookings currently blocked — release once payment received"
-        accent="rust"
-        rows={activeSort.sort(active)}
-        loading={holdsLoading}
-        actingId={actingId}
-        onOpen={setOpenId}
-        sortKey={activeSort.key} sortDir={activeSort.dir} onSort={activeSort.toggle}
-        actions={(r) => (
-          <BoardBtn variant="release" onClick={() => changeHold(r.id, 'Released')}>Release</BoardBtn>
-        )}
-      />
-
-      {/* Search results */}
+      {/* Search results — appear directly below the search bar so the
+          booking team sees their lookup answer first, before scrolling
+          past the hold boards. */}
       {error && (
         <div style={{ color: 'var(--rust)', padding: 16 }}>Failed: {error}</div>
       )}
 
       {!error && q.trim().length >= 2 && !loading && rows.length === 0 && (
-        <div className="view-empty" style={{ padding: 40, textAlign: 'center' }}>
+        <div className="view-empty" style={{ padding: 40, textAlign: 'center', marginBottom: 20 }}>
           <h3 style={{ fontSize: 18, color: 'var(--navy-deep)', marginBottom: 8 }}>No matching accounts</h3>
           <p style={{ color: 'var(--t-2)' }}>
             No client or family contains "<strong>{q}</strong>". This usually means the booking is safe to proceed — verify with accounts team if unsure.
@@ -241,7 +207,7 @@ export default function HoldCheckPage() {
       {rows.length > 0 && (
         <div style={{
           background: 'var(--bg-1, #fff)', border: '1px solid var(--line, #e7eaf0)',
-          borderRadius: 12, overflow: 'hidden',
+          borderRadius: 12, overflow: 'hidden', marginBottom: 20,
         }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
             <thead>
@@ -277,6 +243,43 @@ export default function HoldCheckPage() {
           </table>
         </div>
       )}
+
+      {/* Hold boards — collapsed by default so the page opens clean.
+          Click a board header to expand its list. */}
+      {holdsError && (
+        <div style={{ color: 'var(--rust)', padding: 12, marginBottom: 12, fontSize: 13 }}>
+          Failed to load holds: {holdsError}
+        </div>
+      )}
+      <HoldBoard
+        title="Hold candidates"
+        subtitle="Flagged by execs — pending owner / CM approval"
+        accent="amber"
+        rows={candidateSort.sort(candidates)}
+        loading={holdsLoading}
+        actingId={actingId}
+        onOpen={setOpenId}
+        sortKey={candidateSort.key} sortDir={candidateSort.dir} onSort={candidateSort.toggle}
+        actions={(r) => (
+          <>
+            <BoardBtn variant="approve" onClick={() => changeHold(r.id, 'Active')}>Approve</BoardBtn>
+            <BoardBtn variant="release" onClick={() => changeHold(r.id, 'Released')}>Drop</BoardBtn>
+          </>
+        )}
+      />
+      <HoldBoard
+        title="On hold"
+        subtitle="Bookings currently blocked — release once payment received"
+        accent="rust"
+        rows={activeSort.sort(active)}
+        loading={holdsLoading}
+        actingId={actingId}
+        onOpen={setOpenId}
+        sortKey={activeSort.key} sortDir={activeSort.dir} onSort={activeSort.toggle}
+        actions={(r) => (
+          <BoardBtn variant="release" onClick={() => changeHold(r.id, 'Released')}>Release</BoardBtn>
+        )}
+      />
 
       {/* Drawer */}
       <AccountDrawer accountId={openId} onClose={() => setOpenId(null)} />
@@ -328,6 +331,10 @@ function HoldBoard({
 
   const sumOutstanding = rows.reduce((s, r) => s + (r.bill || 0), 0);
 
+  // Collapsed by default — the booking team opens this page to search,
+  // not to browse the full hold list. Clicking the header expands.
+  const [open, setOpen] = useState(false);
+
   return (
     <div style={{
       background: 'rgba(255,255,255,0.60)',
@@ -335,27 +342,46 @@ function HoldBoard({
       borderRadius: 12, overflow: 'hidden',
       marginBottom: 18,
     }}>
-      <div style={{
-        padding: '12px 18px',
-        display: 'flex', alignItems: 'baseline', gap: 12, flexWrap: 'wrap',
-        borderBottom: '1px solid rgba(15,40,85,0.08)',
-      }}>
-        <div style={{
+      <button
+        type="button"
+        onClick={() => setOpen(v => !v)}
+        aria-expanded={open}
+        style={{
+          width: '100%', textAlign: 'left',
+          padding: '12px 18px',
+          display: 'flex', alignItems: 'baseline', gap: 12, flexWrap: 'wrap',
+          borderBottom: open ? '1px solid rgba(15,40,85,0.08)' : 'none',
+          background: 'transparent', border: 'none', cursor: 'pointer',
+          fontFamily: 'inherit',
+        }}
+      >
+        <span style={{
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          width: 16, height: 16, color: 'var(--ink-soft)',
+          transform: open ? 'rotate(90deg)' : 'rotate(0deg)',
+          transition: 'transform 120ms ease',
+          flexShrink: 0,
+        }}>
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="9 6 15 12 9 18" />
+          </svg>
+        </span>
+        <span style={{
           padding: '3px 8px', borderRadius: 4,
           background: badgeBg, color: badgeFg,
           fontSize: 10, fontWeight: 700, letterSpacing: '.22em', textTransform: 'uppercase',
-        }}>{title}</div>
-        <div style={{ fontSize: 12.5, color: 'var(--ink-soft)' }}>{subtitle}</div>
-        <div style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--ink-soft)' }}>
+        }}>{title}</span>
+        <span style={{ fontSize: 12.5, color: 'var(--ink-soft)' }}>{subtitle}</span>
+        <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--ink-soft)' }}>
           {loading ? 'Loading…' : `${rows.length} party${rows.length === 1 ? '' : 'ies'} · ${fmtINR(sumOutstanding)} exposure`}
-        </div>
-      </div>
-      {!loading && rows.length === 0 && (
+        </span>
+      </button>
+      {open && !loading && rows.length === 0 && (
         <div style={{ padding: 24, textAlign: 'center', color: 'var(--ink-soft)', fontSize: 13, fontStyle: 'italic' }}>
           None right now.
         </div>
       )}
-      {rows.length > 0 && (
+      {open && rows.length > 0 && (
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
           <thead>
             <tr style={{ borderBottom: '1px solid rgba(15,40,85,0.06)' }}>
