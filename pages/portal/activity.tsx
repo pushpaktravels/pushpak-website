@@ -9,6 +9,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { AppShell } from '../../components/AppShell';
 import { ExportButton } from '../../components/ExportButton';
 import { SortableTh, useSort } from '../../components/SortableTh';
+import { roleLabel } from '../../lib/roles';
 
 type UserRow = {
   userId: string; userName: string; execId: string; role: string;
@@ -311,19 +312,28 @@ function prettyPage(p: string): string {
 }
 
 function RolePill({ role }: { role: string }) {
+  // Keyed by the current role taxonomy (lib/roles.ts). Unknown / legacy
+  // slugs fall back to neutral so the pill never renders blank.
   const map: Record<string, string> = {
-    owner: 'rgba(217,165,69,.18)',
-    admin: 'rgba(15,40,85,.10)',
-    cm:    'rgba(46,108,84,.12)',
-    exec:  'rgba(15,40,85,.06)',
-    analyst: 'rgba(120,130,150,.16)',
+    owner:                   'rgba(217,165,69,.18)',
+    admin:                   'rgba(15,40,85,.10)',
+    'cm-accounts':           'rgba(13,71,161,.12)',
+    accounts:                'rgba(46,108,84,.12)',
+    'domestic-reservations': 'rgba(72,118,184,.12)',
+    'domestic-package':      'rgba(105,168,219,.12)',
+    'international-packages': 'rgba(178,79,55,.10)',
+    visa:                    'rgba(146,98,160,.12)',
+    insights:                'rgba(100,116,139,.16)',
+    marketing:               'rgba(217,72,118,.10)',
+    hr:                      'rgba(46,108,84,.12)',
+    'support-staff':         'rgba(120,113,108,.14)',
   };
   return <span style={{
     background: map[role] || 'rgba(15,40,85,.06)',
     color: 'var(--ink)',
     fontSize: 10, fontWeight: 700, letterSpacing: '.14em', textTransform: 'uppercase',
     padding: '3px 8px', borderRadius: 4,
-  }}>{role}</span>;
+  }}>{roleLabel(role)}</span>;
 }
 
 function StatCard({ label, value, sub, accent }: { label: string; value: string; sub?: string; accent?: 'sage' | 'rust' }) {

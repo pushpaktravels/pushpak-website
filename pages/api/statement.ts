@@ -8,11 +8,13 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { query, queryOne } from '@/lib/pg';
 import { requireAuth } from '@/lib/auth';
+import { requireView } from '@/lib/views';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'GET') return res.status(405).json({ ok: false, error: 'Method not allowed' });
   const user = await requireAuth(req, res);
   if (!user) return;
+  if (!requireView(user, res, 'worklist')) return;
   const party = typeof req.query.party === 'string' ? req.query.party.trim() : '';
   if (!party) return res.status(400).json({ ok: false, error: 'Missing party' });
 

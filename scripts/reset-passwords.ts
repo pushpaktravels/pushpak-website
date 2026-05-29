@@ -23,6 +23,7 @@ import path from 'path';
 import os from 'os';
 import * as XLSX from 'xlsx';
 import { hashPassword } from '../lib/password';
+import { ROLE_ORDER } from '../lib/roles';
 
 const pool = new Pool({ connectionString: process.env.DIRECT_URL || process.env.DATABASE_URL });
 
@@ -47,11 +48,15 @@ async function main() {
             "totpEnrolledAt", "lastLoginAt"
        FROM "User"
       WHERE active = true
-   ORDER BY
-     CASE role WHEN 'owner' THEN 1 WHEN 'admin' THEN 2 WHEN 'cm' THEN 3 WHEN 'exec' THEN 4 ELSE 5 END,
-     name`
+   ORDER BY name`
   );
-  const users = r.rows;
+  // Sort by the current role taxonomy (lib/roles.ts) so the sheet reads
+  // owner → admin → accounts → departments → support-staff, then by name.
+  const users = r.rows.sort(
+    (a: any, b: any) =>
+      (ROLE_ORDER[a.role] ?? 99) - (ROLE_ORDER[b.role] ?? 99) ||
+      String(a.name).localeCompare(String(b.name))
+  );
   console.log(`  ${users.length} active users.`);
 
   if (users.length === 0) {

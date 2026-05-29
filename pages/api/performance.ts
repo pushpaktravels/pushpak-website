@@ -14,11 +14,13 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { query } from '@/lib/pg';
 import { requireAuth, visibleExecNames } from '@/lib/auth';
+import { requireView } from '@/lib/views';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'GET') return res.status(405).json({ ok: false, error: 'Method not allowed' });
   const user = await requireAuth(req, res);
   if (!user) return;
+  if (!requireView(user, res, 'performance')) return;
 
   const visible = visibleExecNames(user);
   const days = Math.min(Math.max(Number(req.query.days) || 30, 1), 365);

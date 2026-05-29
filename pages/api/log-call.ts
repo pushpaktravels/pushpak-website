@@ -22,6 +22,7 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import { z } from 'zod';
 import { queryOne, withTransaction, newId } from '@/lib/pg';
 import { requireAuth, visibleExecNames } from '@/lib/auth';
+import { requireView } from '@/lib/views';
 import { audit } from '@/lib/audit';
 
 const Body = z.object({
@@ -36,6 +37,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'Method not allowed' });
   const user = await requireAuth(req, res);
   if (!user) return;
+  if (!requireView(user, res, 'worklist')) return;
 
   const parsed = Body.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ ok: false, error: 'Bad request', detail: parsed.error.flatten() });

@@ -15,6 +15,7 @@ import { AppShell } from '../../components/AppShell';
 import { useConfirm } from '../../components/ConfirmProvider';
 import { fmtRelative } from '../../lib/fmt';
 import { ROLES, ROLE_SLUGS, roleLabel, type RoleSlug } from '../../lib/roles';
+import { VIEWS } from '../../lib/views';
 
 type Role = RoleSlug;
 
@@ -30,36 +31,11 @@ type User = {
   lastLoginAt: string | null;
 };
 
-// ─── View catalog (mirrors components/Sidebar.tsx SECTIONS) ──
-// Lists which roles see each view by default (when the user has no
-// per-user viewPerms override set). Brand-new roles like visa /
-// marketing / domestic-* have NO default views — the owner grants
+// View catalog now lives in lib/views.ts — the single source of truth
+// shared with the server-side access gate (canAccessView / requireView)
+// so the UI grid and the API can never disagree. Brand-new roles like
+// visa / marketing / domestic-* have NO default views — the owner grants
 // them via viewPerms.
-const VIEWS: { key: string; label: string; roles: Role[] }[] = [
-  { key: 'dashboard',           label: 'Dashboard',          roles: [...ROLE_SLUGS] }, // personal, every user
-  { key: 'profile',             label: 'My Profile',         roles: [...ROLE_SLUGS] }, // personal, every user
-  { key: 'followup-dashboard',  label: 'Followup Dashboard', roles: ['owner','admin','cm-accounts','accounts','insights'] },
-  { key: 'worklist',            label: 'My Worklist',        roles: ['owner','admin','cm-accounts','accounts'] },
-  { key: 'team-worklist',       label: 'Team Worklist',      roles: ['owner','admin','cm-accounts'] },
-  { key: 'hold-check',          label: 'Hold Check',         roles: ['owner','admin','cm-accounts','accounts'] },
-  { key: 'families',            label: 'Clients & Families', roles: ['owner','admin'] },
-  { key: 'promises',            label: 'Promise Ledger',     roles: ['owner','admin','cm-accounts','accounts'] },
-  { key: 'payment-plans',       label: 'Doubtful Ledger',    roles: ['owner','admin','cm-accounts','accounts'] },
-  { key: 'legal',               label: 'Legal Ledger',       roles: ['owner','admin','cm-accounts','accounts','insights'] },
-  { key: 'collections',         label: 'Collection List',    roles: ['owner','admin','cm-accounts','accounts','insights'] },
-  { key: 'upload',              label: 'Upload & Refresh',   roles: ['owner','admin'] },
-  { key: 'performance',         label: 'Performance',        roles: ['owner','admin','cm-accounts','accounts'] },
-  { key: 'scoreboard',          label: 'Scoreboard',         roles: ['owner','admin','cm-accounts'] },
-  { key: 'insights',            label: 'Insights',           roles: ['owner','insights'] },
-  { key: 'attendance',          label: 'Attendance',         roles: ['owner','admin','hr'] },
-  { key: 'employees',           label: 'Employees',          roles: ['owner','admin','hr'] },
-  { key: 'users-auth',          label: 'Users & Authorities', roles: ['owner'] },
-  { key: 'bulk-cm',             label: 'Bulk CM Assignment', roles: ['owner','admin'] },
-  { key: 'audit',               label: 'Audit Log',          roles: ['owner'] },
-  { key: 'permissions',         label: 'Permissions',        roles: ['owner'] },
-  { key: 'activity',            label: 'Activity & Time',    roles: ['owner','admin'] },
-  { key: 'settings',            label: 'Settings',           roles: ['owner','admin'] },
-];
 
 // Colour palette for the role chip in the users table. Roles not
 // listed here fall back to a neutral slate.

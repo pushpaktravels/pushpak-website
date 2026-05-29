@@ -454,9 +454,9 @@ async function main() {
       (id, "execId", name, role, "passwordHash", scoreboard, active, badge,
        team, "viewPerms", "viewReadOnly", "updatedAt")
      VALUES
-      ('TEST_user_anil',   'TESTANIL01',   'ANIL',   'exec'::"Role", $1, true, true, 'Executive',
+      ('TEST_user_anil',   'TESTANIL01',   'ANIL',   'domestic-reservations', $1, true, true, 'Executive',
        ARRAY[]::text[], ARRAY[]::text[], ARRAY[]::text[], NOW()),
-      ('TEST_user_vishal', 'TESTVISHAL01', 'VISHAL', 'exec'::"Role", $1, true, true, 'Executive',
+      ('TEST_user_vishal', 'TESTVISHAL01', 'VISHAL', 'domestic-reservations', $1, true, true, 'Executive',
        ARRAY[]::text[], ARRAY[]::text[], ARRAY[]::text[], NOW())
      ON CONFLICT ("execId") DO UPDATE SET scoreboard = true`,
     [dummyHash]

@@ -61,8 +61,11 @@ export function requireRole(
 }
 
 // What exec NAMES can this user see? null = see-all.
-// Per owner's directive: every role (owner / admin / cm / exec / analyst)
-// sees every account. Team collaboration > silos for this org.
+// Per owner's directive: every role that can reach a Followup view sees
+// every account within it (no per-exec name scoping). Team collaboration >
+// silos for this org. Which ROLES can reach those views at all is now gated
+// upstream by requireView() (lib/views.ts); this only controls name-level
+// scoping once you're in.
 // Audit-log entries still record WHO took an action, so accountability
 // is preserved even though scope is wide-open.
 export function visibleExecNames(_user: AuthedUser): Set<string> | null {

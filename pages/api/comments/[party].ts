@@ -7,10 +7,12 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import { z } from 'zod';
 import { query, newId } from '@/lib/pg';
 import { requireAuth } from '@/lib/auth';
+import { requireView } from '@/lib/views';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const user = await requireAuth(req, res);
   if (!user) return;
+  if (!requireView(user, res, 'worklist')) return;
 
   const party = decodeURIComponent(String(req.query.party || ''));
   if (!party) return res.status(400).json({ ok: false, error: 'Missing party' });

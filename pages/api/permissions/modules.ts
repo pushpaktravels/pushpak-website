@@ -8,6 +8,7 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import { z } from 'zod';
 import { query, queryOne, newId } from '@/lib/pg';
 import { requireAuth } from '@/lib/auth';
+import { requireView } from '@/lib/views';
 import { requirePermissionAdmin } from '@/lib/permissions';
 import { audit } from '@/lib/audit';
 
@@ -35,6 +36,7 @@ const Patch = z.object({
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const user = await requireAuth(req, res);
   if (!user) return;
+  if (!requireView(user, res, 'permissions')) return;
 
   if (req.method === 'GET') {
     const rows = await query<any>(
