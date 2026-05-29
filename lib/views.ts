@@ -70,6 +70,12 @@ export const VIEWS: ViewRow[] = [
   { key: 'performance',         label: 'Performance',         roles: ['owner', 'admin', 'cm-accounts', 'accounts'] },
   { key: 'scoreboard',          label: 'Scoreboard',          roles: ['owner', 'admin', 'cm-accounts'] },
   { key: 'insights',            label: 'Insights',            roles: ['owner', 'insights'] },
+  // Domestic Reservations module — booking workspace for the
+  // domestic-reservations department. Owner/admin oversee; the desk
+  // staff get these by default. Stand-alone (no Account link yet).
+  { key: 'reservations',          label: 'Reservations',        roles: ['owner', 'admin', 'domestic-reservations'] },
+  { key: 'reservations-dues',     label: 'Reservation Dues',    roles: ['owner', 'admin', 'domestic-reservations'] },
+  { key: 'reservations-worklist', label: 'Reservation Worklist',roles: ['owner', 'admin', 'domestic-reservations'] },
   // HR module.
   { key: 'attendance',          label: 'Attendance',          roles: ['owner', 'admin', 'hr'] },
   { key: 'employees',           label: 'Employees',           roles: ['owner', 'admin', 'hr'] },
@@ -77,7 +83,6 @@ export const VIEWS: ViewRow[] = [
   { key: 'users-auth',          label: 'Users & Authorities', roles: ['owner'] },
   { key: 'bulk-cm',             label: 'Bulk CM Assignment',  roles: ['owner', 'admin'] },
   { key: 'audit',               label: 'Audit Log',           roles: ['owner'] },
-  { key: 'permissions',         label: 'Permissions',         roles: ['owner'] },
   { key: 'activity',            label: 'Activity & Time',     roles: ['owner', 'admin'] },
   { key: 'settings',            label: 'Settings',            roles: ['owner', 'admin'] },
 ];

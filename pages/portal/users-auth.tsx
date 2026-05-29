@@ -74,7 +74,7 @@ export default function UsersAuthPage() {
   const [users, setUsers] = useState<User[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [editTarget, setEditTarget] = useState<User | 'new' | null>(null);
-  const [tab, setTab] = useState<'roster' | 'matrix'>('roster');
+  const [tab, setTab] = useState<'roster' | 'matrix' | 'deactivated'>('roster');
   const confirm = useConfirm();
 
   function load() {
@@ -159,6 +159,11 @@ export default function UsersAuthPage() {
   if (error && !users) return <AppShell title="Users & Authorities" crumb="Roster + Permissions"><div style={{ padding: 16, color: 'var(--rust)' }}>Failed: {error}</div></AppShell>;
   if (!users) return <AppShell title="Users & Authorities" crumb="Roster + Permissions"><div style={{ padding: 32, color: 'var(--t-3)' }}>Loading…</div></AppShell>;
 
+  // Deactivated accounts are pulled out of the main roster and live in
+  // their own tab, so the roster only ever shows people who can sign in.
+  const activeUsers = users.filter(u => u.active);
+  const inactiveUsers = users.filter(u => !u.active);
+
   return (
     <AppShell title="Users & Authorities" crumb="Roster + Permissions">
       {/* Page header with title + ADD USER */}
@@ -181,10 +186,13 @@ export default function UsersAuthPage() {
 
       {error && <div style={{ padding: 12, marginBottom: 12, color: 'var(--rust)', fontSize: 12, background: 'rgba(181,72,61,.08)', borderRadius: 8 }}>Failed: {error}</div>}
 
-      {/* Tab switcher: roster vs. read-only access matrix */}
+      {/* Tab switcher: active roster vs. read-only access matrix vs. deactivated */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
         <TabBtn active={tab === 'roster'} onClick={() => setTab('roster')}>Roster</TabBtn>
         <TabBtn active={tab === 'matrix'} onClick={() => setTab('matrix')}>Access matrix</TabBtn>
+        <TabBtn active={tab === 'deactivated'} onClick={() => setTab('deactivated')}>
+          Deactivated{inactiveUsers.length > 0 ? ` (${inactiveUsers.length})` : ''}
+        </TabBtn>
       </div>
 
       {tab === 'roster' && (
@@ -205,13 +213,12 @@ export default function UsersAuthPage() {
             </tr>
           </thead>
           <tbody>
-            {users.map(u => {
+            {activeUsers.map(u => {
               const meta = ROLE_META[u.role] || ROLE_NEUTRAL;
               const locked = isLocked(u);
               return (
                 <tr key={u.id} style={{
                   borderBottom: '1px solid var(--line, #e7eaf0)',
-                  opacity: u.active ? 1 : 0.55,
                 }}>
                   <Td>
                     <strong style={{ color: 'var(--navy-deep)', fontSize: 14 }}>{u.name}</strong>
@@ -262,6 +269,63 @@ export default function UsersAuthPage() {
       )}
 
       {tab === 'matrix' && <AccessMatrix users={users} />}
+
+      {tab === 'deactivated' && (
+        inactiveUsers.length === 0 ? (
+          <div style={{
+            background: '#fff', border: '1px solid var(--line, #e7eaf0)', borderRadius: 14,
+            padding: '40px 24px', textAlign: 'center', color: 'var(--t-3)', fontSize: 13,
+          }}>
+            No deactivated accounts. Everyone on the roster can currently sign in.
+          </div>
+        ) : (
+        <div style={{
+          background: '#fff', border: '1px solid var(--line, #e7eaf0)',
+          borderRadius: 14, overflow: 'hidden',
+        }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+            <thead>
+              <tr style={{ background: 'var(--bg-2, #f6f8fb)', borderBottom: '1px solid var(--line, #e7eaf0)' }}>
+                <Th>Name</Th>
+                <Th>Executive ID</Th>
+                <Th>Role</Th>
+                <Th>Last sign-in</Th>
+                <Th align="right">Actions</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {inactiveUsers.map(u => {
+                const meta = ROLE_META[u.role] || ROLE_NEUTRAL;
+                return (
+                  <tr key={u.id} style={{ borderBottom: '1px solid var(--line, #e7eaf0)' }}>
+                    <Td>
+                      <strong style={{ color: 'var(--navy-deep)', fontSize: 14 }}>{u.name}</strong>
+                      <div style={{ fontSize: 10.5, color: 'var(--t-3)', marginTop: 2 }}>Deactivated · cannot sign in</div>
+                    </Td>
+                    <Td><span style={{ fontSize: 12, color: 'var(--t-2)' }}>{u.execId}</span></Td>
+                    <Td>
+                      <span style={{
+                        background: meta.bg, color: meta.fg,
+                        padding: '4px 12px', borderRadius: 5,
+                        fontSize: 10.5, fontWeight: 700, letterSpacing: '.16em',
+                        textTransform: 'uppercase',
+                      }}>{roleLabel(u.role)}</span>
+                    </Td>
+                    <Td><span style={{ fontSize: 12, color: 'var(--t-2)' }}>{u.lastLoginAt ? fmtRelative(u.lastLoginAt) : 'Never'}</span></Td>
+                    <Td align="right">
+                      <div style={{ display: 'inline-flex', gap: 8 }}>
+                        <RowBtn onClick={() => setEditTarget(u)}>Edit</RowBtn>
+                        <RowBtn onClick={() => reactivate(u)}>Reactivate</RowBtn>
+                      </div>
+                    </Td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        )
+      )}
 
       {editTarget && (
         <UserEditModal

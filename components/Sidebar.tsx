@@ -19,7 +19,7 @@ export type CurrentUser = {
   mustChangePassword?: boolean;
 };
 
-type Dept = 'command' | 'personal' | 'followup' | 'hr' | 'settings';
+type Dept = 'command' | 'personal' | 'followup' | 'reservations' | 'hr' | 'settings';
 type NavItem = { view: string; label: string; roles: string[]; href: string; icon: ReactNode; dept: Dept };
 type NavSection = { label: string; items: NavItem[]; roles: string[] };
 
@@ -28,11 +28,12 @@ type NavSection = { label: string; items: NavItem[]; roles: string[] };
 // item in it is visible to them (driven by role + viewPerms). Personal
 // is the default landing for every user — every employee sees it.
 const DEPARTMENTS: { slug: Dept; label: string }[] = [
-  { slug: 'command',  label: 'Command Center' },
-  { slug: 'personal', label: 'Personal' },
-  { slug: 'followup', label: 'Followup' },
-  { slug: 'hr',       label: 'HR' },
-  { slug: 'settings', label: 'Settings' },
+  { slug: 'command',      label: 'Command Center' },
+  { slug: 'personal',     label: 'Personal' },
+  { slug: 'followup',     label: 'Followup' },
+  { slug: 'reservations', label: 'Reservations' },
+  { slug: 'hr',           label: 'HR' },
+  { slug: 'settings',     label: 'Settings' },
 ];
 
 const SECTIONS: NavSection[] = [
@@ -52,6 +53,10 @@ const SECTIONS: NavSection[] = [
     items: [
       { view: 'dashboard', label: 'Dashboard',  href: '/portal',         roles: ['owner','admin','cm-accounts','accounts','insights'], dept: 'personal', icon: <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg> },
       { view: 'messages',  label: 'Messages',   href: '/portal/messages', roles: ['owner','admin','cm-accounts','accounts','insights'], dept: 'personal', icon: <svg viewBox="0 0 24 24"><path d="M21 11.5a8.38 8.38 0 0 1-8.5 8.5 8.5 8.5 0 0 1-3.6-.8L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8A8.5 8.5 0 0 1 12.5 3a8.38 8.38 0 0 1 8.5 8.5z"/></svg> },
+      // Owner-only covert chat oversight. Lives in Personal (per owner's
+      // preference) but is hard-gated to the owner in canSee() below — it
+      // must NEVER surface to any exec. Eye icon to distinguish from chat.
+      { view: 'messages-admin', label: 'Message Oversight', href: '/portal/messages-admin', roles: ['owner'], dept: 'personal', icon: <svg viewBox="0 0 24 24"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg> },
       { view: 'profile',   label: 'My Profile', href: '/portal/profile', roles: ['owner','admin','cm-accounts','accounts','insights'], dept: 'personal', icon: <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg> },
     ],
   },
@@ -96,6 +101,17 @@ const SECTIONS: NavSection[] = [
     ],
   },
 
+  // ─── RESERVATIONS department (domestic booking desk) ──────────
+  {
+    label: 'Bookings',
+    roles: ['owner', 'admin', 'domestic-reservations'],
+    items: [
+      { view: 'reservations',          label: 'Reservations',   href: '/portal/reservations',          roles: ['owner','admin','domestic-reservations'], dept: 'reservations', icon: <svg viewBox="0 0 24 24"><path d="M2 16l20-5-7 9-2-4-4 1zM2 16l9-3"/><path d="M11 13l5-7"/></svg> },
+      { view: 'reservations-dues',     label: 'Payment Dues',   href: '/portal/reservations-dues',     roles: ['owner','admin','domestic-reservations'], dept: 'reservations', icon: <svg viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="2.5"/></svg> },
+      { view: 'reservations-worklist', label: 'My Worklist',    href: '/portal/reservations-worklist', roles: ['owner','admin','domestic-reservations'], dept: 'reservations', icon: <svg viewBox="0 0 24 24"><path d="M9 11l3 3 8-8M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg> },
+    ],
+  },
+
   // ─── HR department ────────────────────────────────────────────
   {
     label: 'People',
@@ -112,9 +128,7 @@ const SECTIONS: NavSection[] = [
     roles: ['owner'],
     items: [
       { view: 'users-auth',  label: 'Users & Authorities', href: '/portal/users-auth',  roles: ['owner'],         dept: 'settings', icon: <svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M3 21c0-3.5 2.7-6 6-6s6 2.5 6 6"/><circle cx="17.5" cy="9.5" r="2.5"/></svg> },
-      { view: 'permissions', label: 'Permissions',         href: '/portal/permissions', roles: ['owner'],         dept: 'settings', icon: <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></svg> },
       { view: 'audit',       label: 'Audit Log',           href: '/portal/audit',       roles: ['owner'],         dept: 'settings', icon: <svg viewBox="0 0 24 24"><path d="M12 2l3 7h7l-5.5 4 2 7L12 16l-6.5 4 2-7L2 9h7z"/></svg> },
-      { view: 'messages-admin', label: 'Message Oversight', href: '/portal/messages-admin', roles: ['owner'],     dept: 'settings', icon: <svg viewBox="0 0 24 24"><path d="M21 11.5a8.38 8.38 0 0 1-8.5 8.5 8.5 8.5 0 0 1-3.6-.8L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8A8.5 8.5 0 0 1 12.5 3a8.38 8.38 0 0 1 8.5 8.5z"/></svg> },
       { view: 'activity',    label: 'Activity & Time',     href: '/portal/activity',    roles: ['owner','admin'], dept: 'settings', icon: <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg> },
       { view: 'settings',    label: 'Settings',            href: '/portal/settings',    roles: ['owner','admin'], dept: 'settings', icon: <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 1 1-14 0 7 7 0 0 1 14 0z"/></svg> },
     ],
@@ -128,6 +142,11 @@ function canSee(item: NavItem, user: CurrentUser): boolean {
   // is a pure spectator, so he gets Dashboard + Profile but NOT chat —
   // mirrors lib/views.ts canAccessView.
   if (item.dept === 'personal') {
+    // Covert chat oversight lives in Personal (per owner's preference) but
+    // is the ONE personal item that is NOT universal — it must never surface
+    // to any exec, so it is hard-gated to the owner regardless of the
+    // personal-dept bypass below.
+    if (item.view === 'messages-admin') return user.role === 'owner';
     if (INSIGHTS_ONLY_EXEC_IDS.has(user.execId)) {
       return item.view === 'dashboard' || item.view === 'profile';
     }
@@ -159,6 +178,17 @@ function canSee(item: NavItem, user: CurrentUser): boolean {
   return true;
 }
 
+// Is `href` the active route for `pathname`? Matches the exact page or a
+// real sub-path (href + '/'), but NEVER a sibling that merely shares a
+// string prefix. Without the '/' boundary, '/portal/messages-admin' would
+// match the '/portal/messages' nav item (startsWith is true), flipping the
+// dropdown to the wrong department and highlighting the wrong link.
+function isActiveHref(pathname: string, href: string): boolean {
+  if (pathname === href) return true;
+  if (href === '/portal') return false;          // dashboard: exact match only
+  return pathname.startsWith(href + '/');
+}
+
 // Persist sidebar scroll position across page navigations.
 const NAV_SCROLL_KEY = 'pushpak:nav-scroll';
 // Persist current department selection per session.
@@ -180,9 +210,7 @@ export function Sidebar({ user }: { user: CurrentUser }) {
 
   // Detect the department of the currently-open page so the dropdown
   // can auto-sync when the user clicks a link in another department.
-  const currentItem = visibleItems.find(i =>
-    router.pathname === i.href || (i.href !== '/portal' && router.pathname.startsWith(i.href))
-  );
+  const currentItem = visibleItems.find(i => isActiveHref(router.pathname, i.href));
 
   const [selectedDept, setSelectedDept] = useState<Dept>(() => {
     // Start on the CURRENT page's department from the very first render
@@ -293,8 +321,7 @@ export function Sidebar({ user }: { user: CurrentUser }) {
           <div key={section.label} className="nav-section">
             <span className="nav-section-label">{section.label}</span>
             {section.items.map(item => {
-              const active = router.pathname === item.href ||
-                            (item.href !== '/portal' && router.pathname.startsWith(item.href));
+              const active = isActiveHref(router.pathname, item.href);
               return (
                 <Link key={item.view} href={item.href} className={`nav-link ${active ? 'active' : ''}`}>
                   {item.icon}

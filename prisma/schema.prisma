@@ -401,7 +401,8 @@ model Setting {
 model Employee {
   id               String    @id @default(cuid())
   machineCode      String?   @unique // biometric E.Code; null until matched
-  hrCode           String    @unique // "E-001" style HR code
+  hrCode           String    @unique // "E-001" style HR code — the canonical employee code
+  loginExecId      String?   @unique // portal login (User.execId) this employee uses; null until linked
   name             String
   department       String?
   designation      String?
@@ -672,4 +673,36 @@ model Message {
   createdAt      DateTime @default(now())
 
   @@index([conversationId, createdAt])
+}
+
+// ─── DOMESTIC RESERVATIONS ────────────────────────────────────
+// Stand-alone booking workspace for the domestic-reservations
+// department (added 2026-05-30). Not yet linked to Account/Client —
+// passenger + contact are free text for now. Runtime reads/writes go
+// through node-postgres (lib/pg); this model is for schema authoring
+// and TypeScript types only. Mirrored by scripts/add-reservations.ts
+// for the production migration.
+model Reservation {
+  id              String    @id @default(cuid())
+  pnr             String? // airline locator; null while still "Held"
+  passengerName   String // primary passenger
+  paxCount        Int       @default(1)
+  contact         String? // phone / email, free text
+  sector          String // e.g. "GAU-DEL" or "Guwahati → Delhi"
+  airline         String?
+  travelDate      DateTime?
+  fareAmount      Decimal   @default(0) @db.Decimal(12, 2)
+  amountCollected Decimal   @default(0) @db.Decimal(12, 2)
+  vendor          String?
+  status          String    @default("Held") // Held | Ticketed | Cancelled
+  notes           String?   @db.Text
+  agentExecId     String? // owning agent's exec id (drives the daily worklist)
+  agentName       String?
+  createdBy       String? // exec id of whoever created the row
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([status])
+  @@index([travelDate])
+  @@index([agentExecId])
 }
