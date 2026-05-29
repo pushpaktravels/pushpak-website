@@ -7,6 +7,7 @@
 import { useEffect, useState } from 'react';
 import { AppShell } from '../../components/AppShell';
 import { AccountDrawer } from '../../components/AccountDrawer';
+import { AccountSearch } from '../../components/AccountSearch';
 import { TierBadge } from '../../components/TierBadge';
 import { SortableTh, useSort } from '../../components/SortableTh';
 import { fmtINR, fmtDate } from '../../lib/fmt';
@@ -64,6 +65,7 @@ export default function LegalLedgerPage() {
 
   return (
     <AppShell title="Legal Ledger" crumb="Legal Ledger">
+      <AccountSearch onSelect={setOpenId} />
       <FilterBar>
         {FILTERS.map(f => (
           <FilterChip key={f.key} active={status === f.key} onClick={() => setStatus(f.key)}>

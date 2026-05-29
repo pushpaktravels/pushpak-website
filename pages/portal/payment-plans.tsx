@@ -7,6 +7,7 @@
 import { useEffect, useState } from 'react';
 import { AppShell } from '../../components/AppShell';
 import { AccountDrawer } from '../../components/AccountDrawer';
+import { AccountSearch } from '../../components/AccountSearch';
 import { TierBadge } from '../../components/TierBadge';
 import { fmtINR, fmtDate } from '../../lib/fmt';
 
@@ -58,6 +59,7 @@ export default function DoubtfulLedgerPage() {
 
   return (
     <AppShell title="Doubtful Ledger" crumb="Doubtful Ledger">
+      <AccountSearch onSelect={setOpenId} />
       <FilterBar>
         <FilterChip active={scope === 'active'} onClick={() => setScope('active')}>Active</FilterChip>
         <FilterChip active={scope === 'all'} onClick={() => setScope('all')}>All (incl. cancelled)</FilterChip>

@@ -17,6 +17,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AppShell } from '../../components/AppShell';
 import { AccountDrawer } from '../../components/AccountDrawer';
+import { AccountSearch } from '../../components/AccountSearch';
 import { TierBadge } from '../../components/TierBadge';
 import { SendReminder } from '../../components/SendReminder';
 import { ExportButton } from '../../components/ExportButton';
@@ -132,6 +133,7 @@ function Inner() {
 
   return (
     <div style={{ maxWidth: 1180, margin: '0 auto', padding: '4px 4px 60px' }}>
+      <AccountSearch onSelect={setOpenId} />
       <div style={{ marginBottom: 22 }}>
         <h1 style={{ fontSize: 22, fontWeight: 600, color: 'var(--ink)', margin: 0 }}>My Worklist</h1>
         <p style={{ fontSize: 13, color: 'var(--ink-soft)', marginTop: 6, lineHeight: 1.5 }}>

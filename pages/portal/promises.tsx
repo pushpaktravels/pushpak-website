@@ -11,6 +11,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AppShell } from '../../components/AppShell';
 import { AccountDrawer } from '../../components/AccountDrawer';
+import { AccountSearch } from '../../components/AccountSearch';
 import { TierBadge } from '../../components/TierBadge';
 import { SortableTh, useSort } from '../../components/SortableTh';
 import { fmtINR, fmtDate } from '../../lib/fmt';
@@ -119,6 +120,7 @@ export default function PromiseLedgerPage() {
 
   return (
     <AppShell title="Promise Ledger" crumb="Promise Ledger">
+      <AccountSearch onSelect={setOpenId} />
       <FilterBar>
         {STATUSES.map(s => (
           <FilterChip key={s} active={status === s} onClick={() => setStatus(s)}>

@@ -10,6 +10,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AppShell } from '../../components/AppShell';
 import { AccountDrawer } from '../../components/AccountDrawer';
+import { AccountSearch } from '../../components/AccountSearch';
 import { TierBadge } from '../../components/TierBadge';
 import { fmtINR } from '../../lib/fmt';
 
@@ -91,6 +92,7 @@ export default function TeamWorklistPage() {
 
   return (
     <AppShell title="Team Worklist" crumb="Team Worklist">
+      <AccountSearch onSelect={setOpenId} />
       {error && (
         <div style={{ color: 'var(--rust)', padding: 16, marginBottom: 18 }}>Failed: {error}</div>
       )}

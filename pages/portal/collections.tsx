@@ -7,6 +7,7 @@
 import { useEffect, useState } from 'react';
 import { AppShell } from '../../components/AppShell';
 import { AccountDrawer } from '../../components/AccountDrawer';
+import { AccountSearch } from '../../components/AccountSearch';
 import { TierBadge } from '../../components/TierBadge';
 import { SortableTh, useSort } from '../../components/SortableTh';
 import { fmtINR, fmtDate } from '../../lib/fmt';
@@ -61,6 +62,7 @@ export default function CollectionListPage() {
 
   return (
     <AppShell title="Collection List" crumb="Collection List">
+      <AccountSearch onSelect={setOpenId} />
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         gap: 16, marginBottom: 16, padding: '14px 18px',

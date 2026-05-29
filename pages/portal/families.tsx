@@ -8,6 +8,7 @@
 import { useEffect, useState } from 'react';
 import { AppShell } from '../../components/AppShell';
 import { AccountDrawer } from '../../components/AccountDrawer';
+import { AccountSearch } from '../../components/AccountSearch';
 import { TierBadge } from '../../components/TierBadge';
 import { useConfirm } from '../../components/ConfirmProvider';
 import { fmtINR } from '../../lib/fmt';
@@ -113,6 +114,7 @@ export default function FamiliesPage() {
 
   return (
     <AppShell title="Clients & Families" crumb="Clients & Families">
+      <AccountSearch onSelect={setOpenId} />
       {error && <ErrorBox>{error}</ErrorBox>}
       {families === null && !error && <Loading />}
       {families && families.length === 0 && <EmptyState
