@@ -32,6 +32,106 @@ export async function activeSecByExec(days: number): Promise<Record<string, numb
   return out;
 }
 
+// ── Reservations desk metrics ─────────────────────────────────
+// Per-agent booking-desk numbers, shared by the dedicated Desk
+// Performance page (/api/reservations/performance) AND the owner's
+// Command Center roll-up (/api/overview) so the two can never tell a
+// different story. Two dimensions:
+//   OUTPUT          — bookings, pax, fare booked, collected, plus the
+//                     status mix (ticketed/held/cancelled), WINDOWED by
+//                     createdAt over the last `days` days.
+//   ACCOUNTABILITY  — outstanding, overdue (travelled but still owes) and
+//                     at-risk (Held with travel ≤ 3 days). These are LIVE
+//                     (current state, NOT windowed) — the debts/risks on
+//                     the desk right now. ENGAGEMENT (active time) is left
+//                     to callers via activeSecByExec so this stays one
+//                     focused DB round-trip.
+// `days` is a clamped number (see clampDays) so interpolation is safe.
+export type ReservationAgent = {
+  execId: string;
+  name: string;
+  bookings: number;
+  pax: number;
+  fareBooked: number;
+  collected: number;
+  ticketed: number;
+  held: number;
+  cancelled: number;
+  outstanding: number;
+  overdue: number;
+  atRisk: number;
+};
+
+export async function reservationAgentMetrics(
+  days: number,
+): Promise<Record<string, ReservationAgent>> {
+  const [outputRows, liveRows] = await Promise.all([
+    // OUTPUT — what each agent produced inside the window (by createdAt).
+    query<any>(
+      `SELECT "agentExecId" AS exec_id,
+              MAX("agentName") AS name,
+              COUNT(*)::int                                      AS bookings,
+              COALESCE(SUM("paxCount"), 0)::int                  AS pax,
+              COALESCE(SUM("fareAmount"), 0)::numeric            AS fare_booked,
+              COALESCE(SUM("amountCollected"), 0)::numeric       AS collected,
+              COUNT(*) FILTER (WHERE status = 'Ticketed')::int   AS ticketed,
+              COUNT(*) FILTER (WHERE status = 'Held')::int       AS held,
+              COUNT(*) FILTER (WHERE status = 'Cancelled')::int  AS cancelled
+         FROM "Reservation"
+        WHERE "agentExecId" IS NOT NULL
+          AND "createdAt" >= NOW() - INTERVAL '${days} days'
+        GROUP BY "agentExecId"`,
+    ),
+    // ACCOUNTABILITY — live obligations, NOT windowed.
+    query<any>(
+      `SELECT "agentExecId" AS exec_id,
+              MAX("agentName") AS name,
+              COALESCE(SUM("fareAmount" - "amountCollected"), 0)::numeric AS outstanding,
+              COUNT(*) FILTER (
+                WHERE ("fareAmount" - "amountCollected") > 0
+                  AND "travelDate" IS NOT NULL AND "travelDate" < NOW()
+              )::int AS overdue,
+              COUNT(*) FILTER (
+                WHERE status = 'Held'
+                  AND "travelDate" IS NOT NULL
+                  AND "travelDate" >= NOW()
+                  AND "travelDate" < NOW() + INTERVAL '3 days'
+              )::int AS at_risk
+         FROM "Reservation"
+        WHERE "agentExecId" IS NOT NULL
+          AND status <> 'Cancelled'
+        GROUP BY "agentExecId"`,
+    ),
+  ]);
+
+  const byExec: Record<string, ReservationAgent> = {};
+  const bucket = (execId: string): ReservationAgent => (byExec[execId] ||= {
+    execId, name: execId,
+    bookings: 0, pax: 0, fareBooked: 0, collected: 0, ticketed: 0, held: 0, cancelled: 0,
+    outstanding: 0, overdue: 0, atRisk: 0,
+  });
+
+  for (const r of outputRows) {
+    const b = bucket(r.exec_id);
+    if (r.name) b.name = r.name;
+    b.bookings = Number(r.bookings);
+    b.pax = Number(r.pax);
+    b.fareBooked = Number(r.fare_booked);
+    b.collected = Number(r.collected);
+    b.ticketed = Number(r.ticketed);
+    b.held = Number(r.held);
+    b.cancelled = Number(r.cancelled);
+  }
+  for (const r of liveRows) {
+    const b = bucket(r.exec_id);
+    if (r.name) b.name = r.name;
+    b.outstanding = Number(r.outstanding);
+    b.overdue = Number(r.overdue);
+    b.atRisk = Number(r.at_risk);
+  }
+  return byExec;
+}
+
 // Human-friendly duration: 7320 → "2h 2m", 540 → "9m", 0 → "—".
 export function fmtDuration(totalSec: number): string {
   const s = Math.max(0, Math.round(totalSec));

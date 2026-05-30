@@ -37,6 +37,11 @@ type Overview = {
     concerns: { name: string; department: string; absents: number; lates: number }[];
   };
   leaderboard: { exec: string; recovered: number; recoveryCount: number; calls: number }[];
+  reservations: {
+    days: number;
+    totals: { bookings: number; fareBooked: number; collected: number; outstanding: number; overdue: number; atRisk: number };
+    agents: { execId: string; name: string; bookings: number; fareBooked: number; collected: number; outstanding: number }[];
+  } | null;
 };
 
 export default function OverviewPage() {
@@ -254,16 +259,20 @@ function Dashboard({ d }: { d: Overview }) {
         </Section>
       </div>
 
+      {/* ── Domestic Reservations desk (Phase 3 roll-up) ── */}
+      {d.reservations && <ReservationsPanel r={d.reservations} />}
+
       {/* ── Honest coverage note ── */}
       <div style={{
         background: 'var(--bg-2, #f6f8fb)', border: '1px dashed var(--line, #e7eaf0)',
         borderRadius: 12, padding: '14px 16px', fontSize: 12.5, color: 'var(--t-2)', lineHeight: 1.6,
       }}>
         <strong style={{ color: 'var(--navy-deep)' }}>About this data.</strong>{' '}
-        Detailed <em>performance</em> numbers (recoveries, calls, promises) exist today only for the
-        Accounts / Followup team. Every department above is fully covered for <em>attendance</em>.
-        Performance tracking for Visa, Packages and Reservations is being instrumented next — once
-        live, those teams will surface here the same way the Accounts leaderboard does.
+        Detailed <em>performance</em> numbers exist today for the Accounts / Followup team
+        (recoveries, calls, promises) and the Domestic Reservations desk (bookings, ticketing,
+        collection). Every department above is fully covered for <em>attendance</em>.
+        Performance tracking for Visa and Packages is being instrumented next — once live, those
+        teams will surface here the same way.
       </div>
 
       <style jsx>{`
@@ -272,6 +281,48 @@ function Dashboard({ d }: { d: Overview }) {
         }
       `}</style>
     </div>
+  );
+}
+
+// ── Domestic Reservations desk roll-up ────────────────────────
+// Mirrors the dedicated Desk Performance page in miniature: a money +
+// accountability strip plus the top agents. Output (bookings / fare /
+// collected) is the last-30d window; overdue & at-risk are live.
+function ReservationsPanel({ r }: { r: NonNullable<Overview['reservations']> }) {
+  const t = r.totals;
+  const collRate = t.fareBooked > 0 ? Math.round((t.collected / t.fareBooked) * 100) : null;
+  return (
+    <Section
+      title="Domestic Reservations desk"
+      sub={`Booking, ticketing and collection — last ${r.days} days. Overdue & at-risk are live, right now.`}
+    >
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12, marginBottom: 16 }}>
+        <Kpi label="Bookings" value={t.bookings.toLocaleString('en-IN')} tone="navy" />
+        <Kpi label="Fare booked" value={fmtINR(t.fareBooked)} tone="navy" />
+        <Kpi label="Collected" value={fmtINR(t.collected)} tone="sage" sub={collRate == null ? undefined : `${collRate}% of fare`} subTone="sage" />
+        <Kpi label="Outstanding" value={fmtINR(t.outstanding)} tone={t.outstanding > 0 ? 'rust' : 'navy'} />
+        <Kpi label="Overdue" value={t.overdue.toLocaleString('en-IN')} sub="travelled, still owes" tone={t.overdue > 0 ? 'rust' : 'navy'} />
+        <Kpi label="At risk (≤3d)" value={t.atRisk.toLocaleString('en-IN')} sub="held, travel near" tone={t.atRisk > 0 ? 'gold' : 'navy'} />
+      </div>
+      {r.agents.length === 0
+        ? <Empty>No desk activity in this window.</Empty>
+        : (
+          <Table head={['Agent', 'Bookings', 'Fare booked', 'Collected', 'Outstanding']}>
+            {r.agents.map((a, i) => (
+              <tr key={a.execId} style={{ borderBottom: '1px solid var(--line, #e7eaf0)' }}>
+                <Td>
+                  <span style={{ display: 'inline-block', width: 20, color: 'var(--t-3)', fontSize: 12 }}>{i + 1}.</span>
+                  <strong style={{ color: 'var(--navy-deep)' }}>{a.name}</strong>
+                </Td>
+                <Td align="right" mono>{a.bookings}</Td>
+                <Td align="right" mono>{fmtINR(a.fareBooked)}</Td>
+                <Td align="right" mono><strong style={{ color: 'var(--sage)' }}>{fmtINR(a.collected)}</strong></Td>
+                <Td align="right" mono><span style={{ color: a.outstanding > 0 ? 'var(--rust)' : 'var(--t-3)' }}>{a.outstanding > 0 ? fmtINR(a.outstanding) : '—'}</span></Td>
+              </tr>
+            ))}
+          </Table>
+        )}
+    </Section>
   );
 }
 

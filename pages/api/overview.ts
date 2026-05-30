@@ -14,8 +14,13 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import { query } from '@/lib/pg';
 import { requireAuth } from '@/lib/auth';
 import { requireView } from '@/lib/views';
+import { reservationAgentMetrics } from '@/lib/perf';
 
 const n = (v: any) => Number(v ?? 0);
+
+// Days window for the cross-department performance roll-ups in the Command
+// Center, kept in step with the other 30-day numbers on the page (recovered30).
+const ROLLUP_DAYS = 30;
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'GET') return res.status(405).json({ ok: false, error: 'Method not allowed' });
@@ -166,6 +171,41 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const attToday: Record<string, number> = {};
     attTotalRows.forEach((r: any) => { attToday[r.status] = n(r.count); });
 
+    // ── Domestic Reservations desk roll-up (Phase 3) ──
+    // Isolated from the main payload so a missing/empty Reservation table
+    // never takes down the owner's Command Center — it just hides the panel.
+    let reservations: {
+      days: number;
+      totals: { bookings: number; fareBooked: number; collected: number; outstanding: number; overdue: number; atRisk: number };
+      agents: { execId: string; name: string; bookings: number; fareBooked: number; collected: number; outstanding: number }[];
+    } | null = null;
+    try {
+      const metrics = Object.values(await reservationAgentMetrics(ROLLUP_DAYS));
+      if (metrics.length > 0) {
+        const totals = metrics.reduce((t, a) => ({
+          bookings: t.bookings + a.bookings,
+          fareBooked: t.fareBooked + a.fareBooked,
+          collected: t.collected + a.collected,
+          outstanding: t.outstanding + a.outstanding,
+          overdue: t.overdue + a.overdue,
+          atRisk: t.atRisk + a.atRisk,
+        }), { bookings: 0, fareBooked: 0, collected: 0, outstanding: 0, overdue: 0, atRisk: 0 });
+        // Top agents by money realised, then fare booked — same ordering as
+        // the dedicated Desk Performance page.
+        const agents = metrics
+          .sort((a, b) => b.collected - a.collected || b.fareBooked - a.fareBooked)
+          .slice(0, 6)
+          .map(a => ({
+            execId: a.execId, name: a.name,
+            bookings: a.bookings, fareBooked: a.fareBooked,
+            collected: a.collected, outstanding: a.outstanding,
+          }));
+        reservations = { days: ROLLUP_DAYS, totals, agents };
+      }
+    } catch (e) {
+      console.error('[api/overview] reservations roll-up skipped', e);
+    }
+
     return res.json({
       ok: true,
       data: {
@@ -215,6 +255,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           })),
         },
         leaderboard,
+        reservations,
       },
     });
   } catch (err: any) {
