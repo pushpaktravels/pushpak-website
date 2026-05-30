@@ -131,14 +131,3 @@ export async function reservationAgentMetrics(
   }
   return byExec;
 }
-
-// Human-friendly duration: 7320 → "2h 2m", 540 → "9m", 0 → "—".
-export function fmtDuration(totalSec: number): string {
-  const s = Math.max(0, Math.round(totalSec));
-  if (s === 0) return '—';
-  const h = Math.floor(s / 3600);
-  const m = Math.floor((s % 3600) / 60);
-  if (h > 0) return m > 0 ? `${h}h ${m}m` : `${h}h`;
-  if (m > 0) return `${m}m`;
-  return `${s}s`;
-}

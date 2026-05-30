@@ -39,5 +39,16 @@ export function fmtRelative(d: Date | string | null | undefined): string {
   return fmtDate(dt);
 }
 
+// Human-readable duration from a second count (e.g. "2h 5m", "12m", "—").
+export function fmtDuration(totalSec: number): string {
+  const s = Math.max(0, Math.round(totalSec));
+  if (s === 0) return '—';
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  if (h > 0) return m > 0 ? `${h}h ${m}m` : `${h}h`;
+  if (m > 0) return `${m}m`;
+  return `${s}s`;
+}
+
 // tierBadge moved to components/TierBadge.tsx (needs JSX, can't live in .ts)
 

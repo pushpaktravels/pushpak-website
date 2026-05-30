@@ -9,8 +9,7 @@
 // ============================================================
 import { useEffect, useState } from 'react';
 import { AppShell } from '../../components/AppShell';
-import { fmtINR } from '../../lib/fmt';
-import { fmtDuration } from '../../lib/perf';
+import { fmtINR, fmtDuration } from '../../lib/fmt';
 
 type Agent = {
   execId: string;
