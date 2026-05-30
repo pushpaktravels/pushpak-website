@@ -11,6 +11,7 @@ import { AppShell } from '../../components/AppShell';
 type Employee = {
   id: string;
   machineCode: string | null;
+  loginExecId: string | null;
   hrCode: string;
   name: string;
   department: string | null;
@@ -34,6 +35,12 @@ type Proposal = {
   score: number; confidence: 'high' | 'medium' | 'low';
 };
 
+type LoginProposal = {
+  employeeId: string; employeeName: string; hrCode: string;
+  execId: string; userName: string; role: string;
+  score: number; confidence: 'high' | 'medium' | 'low';
+};
+
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 export default function EmployeesPage() {
@@ -50,7 +57,10 @@ function EmployeesInner() {
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<Employee | null>(null);
   const [proposals, setProposals] = useState<Proposal[]>([]);
+  const [loginProposals, setLoginProposals] = useState<LoginProposal[]>([]);
   const [importMsg, setImportMsg] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
+  const [showInactive, setShowInactive] = useState(false);
   const fileRef = useRef<HTMLInputElement | null>(null);
 
   async function load() {
@@ -67,6 +77,14 @@ function EmployeesInner() {
 
   const stubs = employees.filter(e => e.hrCode.startsWith('BIO-'));
   const needsEnrich = employees.filter(e => e.hrCode.startsWith('BIO-') || Number(e.monthlySalary) === 0);
+
+  const q = search.trim().toLowerCase();
+  const visible = employees.filter(e => {
+    if (!showInactive && !e.active) return false;
+    if (!q) return true;
+    return [e.name, e.hrCode, e.machineCode, e.department, e.designation, e.loginExecId]
+      .some(v => (v ?? '').toLowerCase().includes(q));
+  });
 
   async function importMaster(file: File) {
     setImportMsg('Importing…'); setError(null); setProposals([]);
@@ -96,6 +114,46 @@ function EmployeesInner() {
     } catch (e: any) { setError(e.message); }
   }
 
+  async function matchLogins() {
+    setImportMsg('Finding login matches…'); setError(null); setLoginProposals([]);
+    try {
+      const r = await fetch('/api/attendance/login-matches');
+      const d = await r.json();
+      if (!d.ok) { setError(d.error || 'Could not load login matches'); setImportMsg(null); return; }
+      if ((d.proposals || []).length === 0) { setImportMsg('No new login matches found — everyone is either linked or has no matching login.'); return; }
+      setLoginProposals(d.proposals);
+      setImportMsg(`${d.proposals.length} login match(es) to review below.`);
+    } catch (e: any) { setError(e.message); setImportMsg(null); }
+  }
+
+  async function confirmLoginLinks(confs: { employeeId: string; execId: string }[]) {
+    if (confs.length === 0) return;
+    try {
+      const r = await fetch('/api/attendance/login-matches', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirmations: confs }),
+      });
+      const d = await r.json();
+      if (!d.ok) { setError(d.error || 'Link failed'); return; }
+      setLoginProposals([]); setImportMsg(`Linked ${d.linked} login(s) to employees.`);
+      load();
+    } catch (e: any) { setError(e.message); }
+  }
+
+  async function toggleActive(emp: Employee) {
+    const action = emp.active ? 'exit' : 'restore';
+    if (emp.active && !confirm(`Exit ${emp.name}? They'll be deactivated and can no longer log in, but all their attendance history is kept. You can restore them later.`)) return;
+    try {
+      const r = await fetch('/api/attendance/employees', {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: emp.id, active: !emp.active }),
+      });
+      const d = await r.json();
+      if (!d.ok) { setError(d.error || `Could not ${action} employee`); return; }
+      load();
+    } catch (e: any) { setError(e.message); }
+  }
+
   return (
     <div style={{ maxWidth: 1280, margin: '0 auto', padding: '4px 4px 60px' }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 16, marginBottom: 18, flexWrap: 'wrap' }}>
@@ -107,8 +165,22 @@ function EmployeesInner() {
           <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" style={{ display: 'none' }}
             onChange={e => { const f = e.target.files?.[0]; if (f) importMaster(f); e.currentTarget.value = ''; }} />
           <button onClick={() => fileRef.current?.click()} style={btnSecondary}>Import Master Sheet</button>
+          <button onClick={matchLogins} style={btnSecondary}>Match Logins</button>
           <button onClick={() => setEditing(blankEmployee())} style={btnPrimary}>+ Add Employee</button>
         </div>
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 14, flexWrap: 'wrap' }}>
+        <input
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          placeholder="Search name, code, dept, login…"
+          style={{ ...inp, maxWidth: 320 }}
+        />
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: 'var(--ink-soft)', cursor: 'pointer' }}>
+          <input type="checkbox" checked={showInactive} onChange={e => setShowInactive(e.target.checked)} />
+          Show exited employees
+        </label>
       </div>
 
       {error && <Banner kind="error">{error}</Banner>}
@@ -118,6 +190,10 @@ function EmployeesInner() {
         <MatchReview proposals={proposals} onConfirm={confirmMatches} onDismiss={() => setProposals([])} />
       )}
 
+      {loginProposals.length > 0 && (
+        <LoginMatchReview proposals={loginProposals} onConfirm={confirmLoginLinks} onDismiss={() => setLoginProposals([])} />
+      )}
+
       {loading ? (
         <div style={{ padding: 40, color: 'var(--ink-soft)' }}>Loading…</div>
       ) : (
@@ -125,23 +201,26 @@ function EmployeesInner() {
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
             <thead>
               <tr style={{ background: 'rgba(15,40,85,0.04)', textAlign: 'left' }}>
-                {['Name', 'HR Code', 'Machine', 'Dept', 'Shift', 'Weekly Off', 'Salary', 'Status', ''].map(h => (
+                {['Name', 'HR Code', 'Machine', 'Login', 'Dept', 'Shift', 'Weekly Off', 'Salary', 'Status', ''].map(h => (
                   <th key={h} style={th}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {employees.map(e => {
+              {visible.length === 0 ? (
+                <tr><td style={{ ...td, color: 'var(--ink-soft)' }} colSpan={10}>No employees match.</td></tr>
+              ) : visible.map(e => {
                 const stub = e.hrCode.startsWith('BIO-');
                 const noSalary = Number(e.monthlySalary) === 0;
                 return (
-                  <tr key={e.id} style={{ borderTop: '1px solid rgba(15,40,85,0.06)' }}>
+                  <tr key={e.id} style={{ borderTop: '1px solid rgba(15,40,85,0.06)', opacity: e.active ? 1 : 0.6 }}>
                     <td style={td}>
                       {e.name}
                       {(stub || noSalary) && <span style={pill('rust')}>needs details</span>}
                     </td>
                     <td style={td}>{stub ? <span style={{ color: 'var(--ink-soft)' }}>{e.hrCode}</span> : e.hrCode}</td>
                     <td style={td}>{e.machineCode || '—'}</td>
+                    <td style={td}>{e.loginExecId ? <span style={{ fontVariantNumeric: 'tabular-nums' }}>{e.loginExecId}</span> : <span style={pill('muted')}>not linked</span>}</td>
                     <td style={td}>{e.department || '—'}</td>
                     <td style={td}>{e.shiftIn && e.shiftOut ? `${e.shiftIn}–${e.shiftOut}` : '—'}</td>
                     <td style={td}>{DAYS[e.weeklyOffDay] ?? '—'}</td>
@@ -149,8 +228,11 @@ function EmployeesInner() {
                       {Number(e.monthlySalary) > 0 ? `₹${Number(e.monthlySalary).toLocaleString('en-IN')}` : '—'}
                     </td>
                     <td style={td}>{e.active ? <span style={pill('sage')}>active</span> : <span style={pill('muted')}>inactive</span>}</td>
-                    <td style={td}>
+                    <td style={{ ...td, whiteSpace: 'nowrap' }}>
                       <button onClick={() => setEditing(e)} style={btnLink}>Edit</button>
+                      <button onClick={() => toggleActive(e)} style={{ ...btnLink, marginLeft: 12, color: e.active ? 'var(--rust, #B5483D)' : 'var(--sage, #2E6C54)' }}>
+                        {e.active ? 'Exit' : 'Restore'}
+                      </button>
                     </td>
                   </tr>
                 );
@@ -213,6 +295,48 @@ function MatchReview({ proposals, onConfirm, onDismiss }: {
   );
 }
 
+function LoginMatchReview({ proposals, onConfirm, onDismiss }: {
+  proposals: LoginProposal[];
+  onConfirm: (c: { employeeId: string; execId: string }[]) => void;
+  onDismiss: () => void;
+}) {
+  const [picked, setPicked] = useState<Set<string>>(
+    () => new Set(proposals.filter(p => p.confidence !== 'low').map(p => p.employeeId))
+  );
+  function toggle(id: string) {
+    setPicked(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  }
+  const confColor = (c: string) => c === 'high' ? 'sage' : c === 'medium' ? 'gold' : 'rust';
+  return (
+    <div style={{ marginBottom: 20, padding: 18, borderRadius: 12, border: '1px solid rgba(26,63,126,0.35)', background: 'rgba(26,63,126,0.05)' }}>
+      <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--ink)', marginBottom: 4 }}>Review login matches</div>
+      <div style={{ fontSize: 12.5, color: 'var(--ink-soft)', marginBottom: 14 }}>
+        We matched each employee to an existing portal login by name. Confirm to link them — the employee then sees their own attendance when they log in.
+      </div>
+      <div style={{ display: 'grid', gap: 8 }}>
+        {proposals.map(p => (
+          <label key={p.employeeId} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 12px', background: '#fff', borderRadius: 8, cursor: 'pointer' }}>
+            <input type="checkbox" checked={picked.has(p.employeeId)} onChange={() => toggle(p.employeeId)} />
+            <span style={{ flex: 1 }}>
+              <b>{p.employeeName}</b> <span style={{ color: 'var(--ink-soft)' }}>({p.hrCode})</span>
+              <span style={{ color: 'var(--ink-soft)' }}> → login </span>
+              <b style={{ fontVariantNumeric: 'tabular-nums' }}>{p.execId}</b>
+              <span style={{ color: 'var(--ink-soft)' }}> · {p.userName} · {p.role}</span>
+            </span>
+            <span style={pill(confColor(p.confidence) as any)}>{p.confidence} · {p.score}</span>
+          </label>
+        ))}
+      </div>
+      <div style={{ display: 'flex', gap: 10, marginTop: 14 }}>
+        <button onClick={() => onConfirm(proposals.filter(p => picked.has(p.employeeId)).map(p => ({ employeeId: p.employeeId, execId: p.execId })))} style={btnPrimary}>
+          Link {picked.size} login{picked.size === 1 ? '' : 's'}
+        </button>
+        <button onClick={onDismiss} style={btnSecondary}>Dismiss</button>
+      </div>
+    </div>
+  );
+}
+
 function EditDrawer({ employee, onClose, onSaved, onError }: {
   employee: Employee; onClose: () => void; onSaved: () => void; onError: (s: string) => void;
 }) {
@@ -225,7 +349,7 @@ function EditDrawer({ employee, onClose, onSaved, onError }: {
     setSaving(true);
     const payload: any = {
       hrCode: f.hrCode, name: f.name,
-      machineCode: emptyToNull(f.machineCode), department: emptyToNull(f.department),
+      machineCode: emptyToNull(f.machineCode), loginExecId: emptyToNull(f.loginExecId), department: emptyToNull(f.department),
       designation: emptyToNull(f.designation), mobile: emptyToNull(f.mobile), email: emptyToNull(f.email),
       dob: emptyToNull(f.dob), joiningDate: emptyToNull(f.joiningDate),
       monthlySalary: Number(f.monthlySalary) || 0,
@@ -258,6 +382,12 @@ function EditDrawer({ employee, onClose, onSaved, onError }: {
           <Field label="Name"><input style={inp} value={f.name} onChange={e => set('name', e.target.value)} /></Field>
           <Field label="HR Code (E-001)"><input style={inp} value={f.hrCode} onChange={e => set('hrCode', e.target.value)} /></Field>
           <Field label="Machine Code"><input style={inp} value={f.machineCode || ''} onChange={e => set('machineCode', e.target.value)} /></Field>
+          <Field label="Portal Login">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <input style={{ ...inp, color: 'var(--ink-soft)' }} value={f.loginExecId || 'Not linked — use “Match Logins”'} readOnly />
+              {f.loginExecId && <button type="button" onClick={() => set('loginExecId', null)} style={btnLink}>Unlink</button>}
+            </div>
+          </Field>
           <Row>
             <Field label="Department"><input style={inp} value={f.department || ''} onChange={e => set('department', e.target.value)} /></Field>
             <Field label="Designation"><input style={inp} value={f.designation || ''} onChange={e => set('designation', e.target.value)} /></Field>
@@ -308,7 +438,7 @@ function EditDrawer({ employee, onClose, onSaved, onError }: {
 // ─── small bits ──────────────────────────────────────────────
 function blankEmployee(): Employee {
   return {
-    id: '', machineCode: null, hrCode: '', name: '', department: null, designation: null,
+    id: '', machineCode: null, loginExecId: null, hrCode: '', name: '', department: null, designation: null,
     mobile: null, email: null, dob: null, joiningDate: null, monthlySalary: 0,
     shiftIn: null, shiftOut: null, weeklyOffDay: 0, leavesCarryOver: false, carryOverDays: 0, active: true,
   };

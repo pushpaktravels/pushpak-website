@@ -10,6 +10,7 @@
 // ============================================================
 import { useEffect, useState } from 'react';
 import { AppShell } from '../components/AppShell';
+import MyAttendancePanel from '../components/MyAttendancePanel';
 
 type Daily = { date: string; sec: number };
 type Data = {
@@ -140,15 +141,10 @@ export default function PersonalDashboardPage() {
           </Section>
         </div>
 
-        {/* Attendance summary (placeholder) */}
-        <Section title="Attendance this month" pendingHR>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12 }}>
-            <Mini label="Present days" value={hr.presentDaysThisMonth} />
-            <Mini label="Absent days"  value={hr.absentDaysThisMonth} accent="rust" />
-            <Mini label="Paid leaves"  value={hr.paidLeavesThisMonth} />
-            <Mini label="Half-days"    value={null} />
-          </div>
-        </Section>
+        {/* Attendance summary — live from the attendance module */}
+        <div style={{ marginTop: 2 }}>
+          <MyAttendancePanel mode="summary" />
+        </div>
 
         {/* Advances + Installments (placeholder) */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18, marginTop: 18 }}>

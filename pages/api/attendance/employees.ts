@@ -14,7 +14,8 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { z } from 'zod';
 import { query, queryOne, newId } from '@/lib/pg';
-import { requireAuth, requireRole } from '@/lib/auth';
+import { requireAuth } from '@/lib/auth';
+import { requireView, requireViewEdit } from '@/lib/views';
 import { audit } from '@/lib/audit';
 
 const hhmm = z.string().regex(/^\d{1,2}:\d{2}$/, 'use HH:MM').nullable().optional();
@@ -22,6 +23,7 @@ const dateStr = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'use YYYY-MM-DD').nullab
 
 const Base = {
   machineCode: z.string().max(40).nullable().optional(),
+  loginExecId: z.string().max(40).nullable().optional(),
   hrCode: z.string().min(1).max(40),
   name: z.string().min(1).max(120),
   department: z.string().max(80).nullable().optional(),
@@ -45,11 +47,11 @@ const PatchBody = z.object({ id: z.string().min(1), ...Base, hrCode: Base.hrCode
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const user = await requireAuth(req, res);
   if (!user) return;
-  if (!requireRole(user, res, 'owner', 'admin')) return;
+  if (!requireView(user, res, 'employees')) return;
 
   if (req.method === 'GET') {
     const rows = await query(
-      `SELECT id, "machineCode", "hrCode", name, department, designation, mobile, email,
+      `SELECT id, "machineCode", "loginExecId", "hrCode", name, department, designation, mobile, email,
               dob, "joiningDate", "monthlySalary", "shiftIn", "shiftOut", "weeklyOffDay",
               "leavesCarryOver", "carryOverDays", active, "createdAt", "updatedAt"
          FROM "Employee"
@@ -59,6 +61,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   if (req.method === 'POST') {
+    if (!requireViewEdit(user, res, 'employees')) return;
     const parsed = CreateBody.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ ok: false, error: 'Bad request', detail: parsed.error.flatten() });
     const d = parsed.data;
@@ -87,6 +90,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   if (req.method === 'PATCH') {
+    if (!requireViewEdit(user, res, 'employees')) return;
     const parsed = PatchBody.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ ok: false, error: 'Bad request', detail: parsed.error.flatten() });
     const d = parsed.data;
@@ -102,10 +106,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const clash = await queryOne(`SELECT id FROM "Employee" WHERE "machineCode" = $1 AND id <> $2`, [d.machineCode, d.id]);
       if (clash) return res.status(409).json({ ok: false, error: `Machine code ${d.machineCode} already mapped` });
     }
+    if (d.loginExecId && d.loginExecId !== existing.loginExecId) {
+      const clash = await queryOne(`SELECT id FROM "Employee" WHERE "loginExecId" = $1 AND id <> $2`, [d.loginExecId, d.id]);
+      if (clash) return res.status(409).json({ ok: false, error: `Login ${d.loginExecId} already linked to another employee` });
+    }
 
     // Build a COALESCE-style partial update: only provided keys change.
     const fields: Record<string, any> = {
-      machineCode: d.machineCode, hrCode: d.hrCode, name: d.name, department: d.department,
+      machineCode: d.machineCode, loginExecId: d.loginExecId, hrCode: d.hrCode, name: d.name, department: d.department,
       designation: d.designation, mobile: d.mobile, email: d.email, dob: d.dob,
       joiningDate: d.joiningDate, monthlySalary: d.monthlySalary, shiftIn: d.shiftIn,
       shiftOut: d.shiftOut, weeklyOffDay: d.weeklyOffDay, leavesCarryOver: d.leavesCarryOver,

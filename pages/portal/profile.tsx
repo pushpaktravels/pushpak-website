@@ -14,6 +14,7 @@
 // ============================================================
 import { useEffect, useState } from 'react';
 import { AppShell } from '../../components/AppShell';
+import MyAttendancePanel from '../../components/MyAttendancePanel';
 
 type Data = {
   ok: true;
@@ -88,15 +89,17 @@ export default function ProfilePage() {
           </div>
         </div>
 
+        {/* Attendance — live from the attendance module */}
+        <div style={{ marginBottom: 18 }}>
+          <Section title="Attendance · this month">
+            <MyAttendancePanel mode="detail" />
+          </Section>
+        </div>
+
         {/* Two-column body */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18, marginBottom: 18 }}>
-          {/* Attendance summary */}
-          <Section title="Attendance · this month" pendingHR>
-            <KV label="Present days"        value={hr.presentDaysThisMonth} />
-            <KV label="Absent days"         value={hr.absentDaysThisMonth} accent="rust" />
-            <KV label="Paid leaves taken"   value={hr.paidLeavesThisMonth} />
-            <KV label="Half-days"           value={null} />
-            <Hr />
+          {/* Work activity (portal usage) */}
+          <Section title="Work activity · this month">
             <KV label="Business days so far" value={data.activity.businessDays} real />
             <KV label="You worked"          value={`${data.activity.monthActiveDays} days`} real />
             <KV label="Active time"         value={fmtHM(data.activity.monthSec)} real />

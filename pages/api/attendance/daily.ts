@@ -12,7 +12,8 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { z } from 'zod';
 import { query, queryOne } from '@/lib/pg';
-import { requireAuth, requireRole } from '@/lib/auth';
+import { requireAuth } from '@/lib/auth';
+import { requireView, requireViewEdit } from '@/lib/views';
 import { audit } from '@/lib/audit';
 
 const VALID_STATUS = [
@@ -36,7 +37,7 @@ const Patch = z.object({
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const user = await requireAuth(req, res);
   if (!user) return;
-  if (!requireRole(user, res, 'owner', 'admin')) return;
+  if (!requireView(user, res, 'attendance')) return;
 
   if (req.method === 'GET') {
     const date = String(req.query.date || '');
@@ -60,6 +61,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   if (req.method === 'PATCH') {
+    if (!requireViewEdit(user, res, 'attendance')) return;
     const parsed = Patch.safeParse(req.body);
     if (!parsed.success) {
       return res.status(400).json({ ok: false, error: 'Bad request', detail: parsed.error.flatten() });
