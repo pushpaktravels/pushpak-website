@@ -19,7 +19,9 @@ export type CurrentUser = {
   mustChangePassword?: boolean;
 };
 
-type Dept = 'command' | 'personal' | 'followup' | 'reservations' | 'hr' | 'settings';
+type Dept = 'command' | 'personal' | 'followup' | 'reservations'
+  | 'domestic-package' | 'international-packages' | 'visa' | 'marketing'
+  | 'hr' | 'settings';
 type NavItem = { view: string; label: string; roles: string[]; href: string; icon: ReactNode; dept: Dept };
 type NavSection = { label: string; items: NavItem[]; roles: string[] };
 
@@ -28,12 +30,16 @@ type NavSection = { label: string; items: NavItem[]; roles: string[] };
 // item in it is visible to them (driven by role + viewPerms). Personal
 // is the default landing for every user — every employee sees it.
 const DEPARTMENTS: { slug: Dept; label: string }[] = [
-  { slug: 'command',      label: 'Command Center' },
-  { slug: 'personal',     label: 'Personal' },
-  { slug: 'followup',     label: 'Followup' },
-  { slug: 'reservations', label: 'Reservations' },
-  { slug: 'hr',           label: 'HR' },
-  { slug: 'settings',     label: 'Settings' },
+  { slug: 'command',                label: 'Command Center' },
+  { slug: 'personal',               label: 'Personal' },
+  { slug: 'followup',               label: 'Followup' },
+  { slug: 'reservations',           label: 'Domestic Reservations' },
+  { slug: 'domestic-package',       label: 'Domestic Package' },
+  { slug: 'international-packages',  label: 'International Packages' },
+  { slug: 'visa',                   label: 'Visa' },
+  { slug: 'marketing',              label: 'Marketing' },
+  { slug: 'hr',                     label: 'HR' },
+  { slug: 'settings',               label: 'Settings' },
 ];
 
 const SECTIONS: NavSection[] = [
@@ -109,6 +115,40 @@ const SECTIONS: NavSection[] = [
       { view: 'reservations',          label: 'Reservations',   href: '/portal/reservations',          roles: ['owner','admin','domestic-reservations'], dept: 'reservations', icon: <svg viewBox="0 0 24 24"><path d="M2 16l20-5-7 9-2-4-4 1zM2 16l9-3"/><path d="M11 13l5-7"/></svg> },
       { view: 'reservations-dues',     label: 'Payment Dues',   href: '/portal/reservations-dues',     roles: ['owner','admin','domestic-reservations'], dept: 'reservations', icon: <svg viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="2.5"/></svg> },
       { view: 'reservations-worklist', label: 'My Worklist',    href: '/portal/reservations-worklist', roles: ['owner','admin','domestic-reservations'], dept: 'reservations', icon: <svg viewBox="0 0 24 24"><path d="M9 11l3 3 8-8M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg> },
+      { view: 'reservations-performance', label: 'Desk Performance', href: '/portal/reservations-performance', roles: ['owner','admin'], dept: 'reservations', icon: <svg viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg> },
+    ],
+  },
+
+  // ─── UPCOMING departments (placeholder workspaces) ────────────
+  // Each is a single "coming soon" landing so the department appears in
+  // the dropdown and its staff land somewhere real. Swap the item's href
+  // target page from <ComingSoon> to the real module when it's built.
+  {
+    label: 'Domestic Package',
+    roles: ['owner', 'admin', 'domestic-package'],
+    items: [
+      { view: 'domestic-package', label: 'Package Desk', href: '/portal/domestic-package', roles: ['owner','admin','domestic-package'], dept: 'domestic-package', icon: <svg viewBox="0 0 24 24"><path d="M3 7l9-4 9 4-9 4-9-4z"/><path d="M3 7v10l9 4 9-4V7"/><path d="M12 11v10"/></svg> },
+    ],
+  },
+  {
+    label: 'International Packages',
+    roles: ['owner', 'admin', 'international-packages'],
+    items: [
+      { view: 'international-packages', label: 'Package Desk', href: '/portal/international-packages', roles: ['owner','admin','international-packages'], dept: 'international-packages', icon: <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.7 4 6 4 9s-1.5 6.3-4 9c-2.5-2.7-4-6-4-9s1.5-6.3 4-9z"/></svg> },
+    ],
+  },
+  {
+    label: 'Visa',
+    roles: ['owner', 'admin', 'visa'],
+    items: [
+      { view: 'visa', label: 'Visa Desk', href: '/portal/visa', roles: ['owner','admin','visa'], dept: 'visa', icon: <svg viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M9 7h6M9 11h6M9 15h3"/></svg> },
+    ],
+  },
+  {
+    label: 'Marketing',
+    roles: ['owner', 'admin', 'marketing'],
+    items: [
+      { view: 'marketing', label: 'Marketing', href: '/portal/marketing', roles: ['owner','admin','marketing'], dept: 'marketing', icon: <svg viewBox="0 0 24 24"><path d="M3 11v2a1 1 0 0 0 1 1h3l5 4V6L7 10H4a1 1 0 0 0-1 1z"/><path d="M16 9a3 3 0 0 1 0 6"/></svg> },
     ],
   },
 

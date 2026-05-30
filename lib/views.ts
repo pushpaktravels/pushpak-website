@@ -76,6 +76,16 @@ export const VIEWS: ViewRow[] = [
   { key: 'reservations',          label: 'Reservations',        roles: ['owner', 'admin', 'domestic-reservations'] },
   { key: 'reservations-dues',     label: 'Reservation Dues',    roles: ['owner', 'admin', 'domestic-reservations'] },
   { key: 'reservations-worklist', label: 'Reservation Worklist',roles: ['owner', 'admin', 'domestic-reservations'] },
+  // Cross-department performance (Phase 3) — booking-desk leaderboard.
+  // Owner/admin oversee; grant a desk lead via viewPerms to let them see it.
+  { key: 'reservations-performance', label: 'Desk Performance',  roles: ['owner', 'admin'] },
+  // Upcoming departments — placeholder workspaces (under construction).
+  // The role + route + sidebar home are wired now so staff in these
+  // departments land somewhere real; the modules get built in later phases.
+  { key: 'domestic-package',       label: 'Domestic Package',      roles: ['owner', 'admin', 'domestic-package'] },
+  { key: 'international-packages',  label: 'International Packages', roles: ['owner', 'admin', 'international-packages'] },
+  { key: 'visa',                   label: 'Visa',                  roles: ['owner', 'admin', 'visa'] },
+  { key: 'marketing',              label: 'Marketing',             roles: ['owner', 'admin', 'marketing'] },
   // HR module.
   { key: 'attendance',          label: 'Attendance',          roles: ['owner', 'admin', 'hr'] },
   { key: 'employees',           label: 'Employees',           roles: ['owner', 'admin', 'hr'] },
