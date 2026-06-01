@@ -10,6 +10,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/router';
 import { AppShell } from '../../components/AppShell';
+import { MentionTextarea } from '../../components/MentionTextarea';
 
 type Member = { id: string; execId: string; name: string };
 type Conversation = {
@@ -242,11 +243,11 @@ export default function MessagesPage() {
                   })}
                 </div>
                 <div style={{ padding: 12, borderTop: '1px solid rgba(15,40,85,0.08)', display: 'flex', gap: 8 }}>
-                  <textarea
+                  <MentionTextarea
                     value={text}
-                    onChange={e => setText(e.target.value)}
+                    onChange={setText}
                     onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMsg(); } }}
-                    placeholder="Type a message…  (Enter to send, Shift+Enter for a new line)"
+                    placeholder="Type a message…  (Enter to send, Shift+Enter for a new line, @ to tag)"
                     rows={1}
                     style={{
                       flex: 1, resize: 'none', fontFamily: 'inherit', fontSize: 13.5, padding: '10px 12px',

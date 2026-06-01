@@ -27,18 +27,32 @@ import { ROLE_ORDER } from '../lib/roles';
 
 const pool = new Pool({ connectionString: process.env.DIRECT_URL || process.env.DATABASE_URL });
 
-// 12 chars from an unambiguous alphabet, dashed every 4 for readability.
-// Alphabet excludes 0/O, 1/l/I — common typo sources.
-// log2(55^12) ≈ 69 bits of entropy. Very strong for a portal login.
-const ALPHA = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
-function generatePassword(): string {
-  const buf = crypto.randomBytes(12);
-  let out = '';
-  for (let i = 0; i < 12; i++) {
-    out += ALPHA[buf[i] % ALPHA.length];
-    if (i === 3 || i === 7) out += '-';
+// EASY-TO-TYPE passwords: one simple capitalised word + "-" + 3 digits,
+// e.g. "Mango-734". Easy for staff to read off the sheet and type, while
+// still having upper+lower+digit and length ≥ 8 to satisfy the login policy.
+// We dedupe so no two users share the same password.
+// Words are short, unambiguous, easy-to-spell English words.
+const WORDS = [
+  'Mango', 'Tiger', 'River', 'Cloud', 'Lemon', 'Maple', 'Pearl', 'Olive',
+  'Robin', 'Coral', 'Amber', 'Daisy', 'Hazel', 'Ivory', 'Jolly', 'Kiwi',
+  'Lotus', 'Melon', 'Noble', 'Peach', 'Quilt', 'Raven', 'Sunny', 'Tulip',
+  'Umbra', 'Vivid', 'Wheat', 'Zebra', 'Apple', 'Berry', 'Clove', 'Delta',
+  'Eagle', 'Fern', 'Grape', 'Honey', 'Iris', 'Jade', 'Koala', 'Lime',
+  'Mint', 'Nest', 'Opal', 'Plum', 'Reed', 'Sage', 'Teak', 'Vine',
+  'Wave', 'Yarn', 'Bloom', 'Cedar', 'Dawn', 'Frost', 'Glen', 'Heron',
+];
+function generatePassword(used: Set<string>): string {
+  for (let tries = 0; tries < 500; tries++) {
+    const buf = crypto.randomBytes(2);
+    const word = WORDS[buf[0] % WORDS.length];
+    const num = 100 + (((buf[1] << 8) | crypto.randomBytes(1)[0]) % 900); // 100–999
+    const pw = `${word}-${num}`;
+    if (!used.has(pw)) { used.add(pw); return pw; }
   }
-  return out;
+  // Fallback (extremely unlikely): append more entropy.
+  const pw = `${WORDS[crypto.randomBytes(1)[0] % WORDS.length]}-${Date.now() % 9000 + 1000}`;
+  used.add(pw);
+  return pw;
 }
 
 async function main() {
@@ -70,8 +84,9 @@ async function main() {
                totpEnrolled: boolean; lastLogin: string;
                plain: string; hash: string };
   const all: Row[] = [];
+  const usedPasswords = new Set<string>();
   for (const u of users) {
-    const plain = generatePassword();
+    const plain = generatePassword(usedPasswords);
     const hash  = await hashPassword(plain);
     all.push({
       id: u.id, execId: u.execId, name: u.name, role: u.role,

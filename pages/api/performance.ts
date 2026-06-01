@@ -57,6 +57,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       `SELECT exec,
               COUNT(*) FILTER (WHERE "loggedAt"  >= NOW() - INTERVAL '${days} days')::int                                            AS added,
               COUNT(*) FILTER (WHERE status = 'Kept'   AND "settledOn" >= NOW() - INTERVAL '${days} days')::int                      AS kept,
+              -- ON TIME: kept AND money landed on or before the promised day.
+              -- Compared by DATE so paying on the promised day itself counts
+              -- as on-time (not penalised for the hour it cleared).
+              COUNT(*) FILTER (WHERE status = 'Kept' AND "settledOn" >= NOW() - INTERVAL '${days} days'
+                               AND "settledOn"::date <= "expectedBy"::date)::int                                                     AS kept_on_time,
               COUNT(*) FILTER (WHERE status = 'Broken' AND ("settledOn" >= NOW() - INTERVAL '${days} days' OR "expectedBy" >= NOW() - INTERVAL '${days} days'))::int AS broken
        FROM "Promise"
        WHERE exec IS NOT NULL ${execWhere}
@@ -77,7 +82,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     function bucket(name: string) {
       return byExec[name] ||= {
         exec: name, calls: 0, accountsTouched: 0,
-        promisesAdded: 0, promisesKept: 0, promisesBroken: 0,
+        promisesAdded: 0, promisesKept: 0, promisesKeptOnTime: 0, promisesBroken: 0,
+        onTimePct: null as number | null,
         recovered: 0, recoveryCount: 0,
       };
     }
@@ -87,7 +93,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     });
     promiseRows.forEach((r: any) => {
       const b = bucket(r.exec);
-      b.promisesAdded = Number(r.added); b.promisesKept = Number(r.kept); b.promisesBroken = Number(r.broken);
+      b.promisesAdded = Number(r.added);
+      b.promisesKept = Number(r.kept);
+      b.promisesKeptOnTime = Number(r.kept_on_time);
+      b.promisesBroken = Number(r.broken);
+      // On-time rate = kept-by-promised-date ÷ everything that came due in the
+      // window (kept + broken). A broken promise is, by definition, not on
+      // time, so it belongs in the denominator. null when nothing came due.
+      const settled = b.promisesKept + b.promisesBroken;
+      b.onTimePct = settled === 0 ? null : Math.round((b.promisesKeptOnTime / settled) * 100);
     });
     recoveryRows.forEach((r: any) => {
       const b = bucket(r.exec);

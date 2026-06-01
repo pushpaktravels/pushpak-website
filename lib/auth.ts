@@ -7,6 +7,7 @@ import { queryOne } from './pg';
 import { COOKIE_NAMES, readCookie } from './cookies';
 import { verifyAccessToken } from './jwt';
 import { INSIGHTS_ONLY_EXEC_IDS } from './roles';
+import { ensureRoleDefaultsLoaded } from './roledefaults-server';
 import type { User } from '@prisma/client';
 
 export type AuthedUser = User & { _mfaPassed: boolean };
@@ -41,6 +42,9 @@ export async function requireAuth(
     res.status(401).json({ ok: false, error: 'Account inactive' });
     return null;
   }
+  // Warm the owner-editable role-default cache (30s TTL → usually a no-op)
+  // so the synchronous canAccessView() gate reads fresh per-role access.
+  await ensureRoleDefaultsLoaded();
   return { ...user, _mfaPassed: !!claims.mfa } as AuthedUser;
 }
 

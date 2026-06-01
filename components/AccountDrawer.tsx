@@ -30,6 +30,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { fmtINR, fmtDate, fmtDateTime, fmtRelative } from '../lib/fmt';
 import { useConfirm } from './ConfirmProvider';
 import { SendReminder } from './SendReminder';
+import { MentionTextarea } from './MentionTextarea';
 
 type Tab = 'account' | 'timeline' | 'contact';
 type ModalKind =
@@ -1021,10 +1022,10 @@ function CommentsThread({ party }: { party: string }) {
         ))}
       </div>
       <div style={{ display: 'flex', gap: 8 }}>
-        <textarea
+        <MentionTextarea
           value={text}
-          onChange={e => setText(e.target.value)}
-          placeholder="Add a comment… use @name to ping someone"
+          onChange={setText}
+          placeholder="Add a comment… type @ to ping someone"
           rows={2}
           style={{
             flex: 1, padding: '8px 12px', borderRadius: 8,

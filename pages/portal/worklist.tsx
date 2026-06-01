@@ -69,7 +69,7 @@ function Inner() {
   // Filtering happens client-side so changing the view is instant.
   useEffect(() => {
     setLoading(true); setError(null);
-    fetch('/api/accounts?limit=500')
+    fetch('/api/accounts?mine=1&limit=500')
       .then(r => r.json())
       .then(r => {
         if (!r?.ok) throw new Error(r?.error || 'Failed to load');

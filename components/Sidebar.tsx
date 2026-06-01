@@ -16,6 +16,10 @@ export type CurrentUser = {
   badge: string;
   viewPerms?: string[] | null;
   viewReadOnly?: string[] | null;
+  // Live, owner-editable default views for this user's role (from /api/me).
+  // Used when the user has no per-user viewPerms, so the nav matches the
+  // server gate after a role default changes.
+  roleViews?: string[] | null;
   mustChangePassword?: boolean;
 };
 
@@ -215,6 +219,13 @@ function canSee(item: NavItem, user: CurrentUser): boolean {
   if (user.viewPerms && user.viewPerms.length > 0) {
     return user.viewPerms.includes(item.view);
   }
+  // Otherwise the role's LIVE default views decide (owner-editable; comes
+  // from /api/me as roleViews). Falls back to the item's hard-coded roles
+  // if roleViews wasn't supplied (e.g. a stale cached user) so the nav
+  // never empties out unexpectedly.
+  if (user.roleViews) {
+    return user.roleViews.includes(item.view);
+  }
   if (!item.roles.includes(user.role)) return false;
   return true;
 }
@@ -241,6 +252,25 @@ export function Sidebar({ user }: { user: CurrentUser }) {
 
   // All items the current user is allowed to see (role + viewPerms).
   const visibleItems = SECTIONS.flatMap(s => s.items).filter(i => canSee(i, user));
+
+  // Unread chat badge on the "Messages" nav item. Only poll if this user
+  // actually has the Messages item (insights-only Vishal does not). Polls
+  // every 45s; the count drops on the next poll after they open & read.
+  const canSeeMessages = visibleItems.some(i => i.view === 'messages');
+  const [unreadMsgs, setUnreadMsgs] = useState(0);
+  useEffect(() => {
+    if (!canSeeMessages) return;
+    let alive = true;
+    const load = () => {
+      fetch('/api/messages/unread')
+        .then(r => r.json())
+        .then(r => { if (alive && r?.ok) setUnreadMsgs(r.unread || 0); })
+        .catch(() => {});
+    };
+    load();
+    const t = setInterval(load, 45000);
+    return () => { alive = false; clearInterval(t); };
+  }, [canSeeMessages, router.pathname]);
 
   // Which departments are available to this user? Owner always sees
   // all three. Others only see a department if they have at least
@@ -363,10 +393,21 @@ export function Sidebar({ user }: { user: CurrentUser }) {
             <span className="nav-section-label">{section.label}</span>
             {section.items.map(item => {
               const active = isActiveHref(router.pathname, item.href);
+              const badge = item.view === 'messages' ? unreadMsgs : 0;
               return (
                 <Link key={item.view} href={item.href} className={`nav-link ${active ? 'active' : ''}`}>
                   {item.icon}
                   {item.label}
+                  {badge > 0 && (
+                    <span style={{
+                      marginLeft: 'auto', minWidth: 18, height: 18, padding: '0 5px',
+                      borderRadius: 9, background: '#B5483D', color: '#fff',
+                      fontSize: 11, fontWeight: 700, display: 'inline-flex',
+                      alignItems: 'center', justifyContent: 'center', lineHeight: 1,
+                    }}>
+                      {badge > 99 ? '99+' : badge}
+                    </span>
+                  )}
                 </Link>
               );
             })}

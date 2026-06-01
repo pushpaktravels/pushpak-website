@@ -41,6 +41,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.json({ ok: true, data: { accounts: [], total: 0 } });
   }
 
+  // "My Worklist" scoping: when the page asks for mine=1, restrict to the
+  // caller's OWN book — i.e. accounts whose exec NAME matches the user's name
+  // (Account.exec stores the handler's name, which equals User.name here).
+  // Owners are exempt and still see every account. This is intentionally
+  // narrow (only the My Worklist page passes mine=1); Team Worklist, ledgers
+  // and Command Center are unaffected.
+  const mine = req.query.mine === '1';
+  if (mine && user.role !== 'owner') {
+    conditions.push(`UPPER(exec) = UPPER($${i++})`);
+    params.push(user.name);
+  }
+
   // Optional filters from query string
   const exec = typeof req.query.exec === 'string' ? req.query.exec.toUpperCase() : null;
   const tier = typeof req.query.tier === 'string' ? req.query.tier.toUpperCase() : null;

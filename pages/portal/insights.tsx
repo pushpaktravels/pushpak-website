@@ -39,8 +39,10 @@ type Insights = {
   leaderboard: {
     exec: string; recovered: string | number; calls: number;
     promises_kept: number; promises_broken: number; promises_open: number; promises_total: number;
+    promises_kept_on_time: number;
     accounts: number; outstanding: string | number;
     kept_rate: number | null;
+    on_time_rate: number | null;
   }[];
   agingMix: { d30: string; d60: string; d90: string; d90p: string };
   topAccounts: { id: string; party: string; family: string | null; exec: string | null; tier: string; bill: string | number; onHold: string | null }[];
@@ -162,7 +164,7 @@ export default function InsightsPage() {
               return (
                 <div key={row.exec} style={{
                   display: 'grid',
-                  gridTemplateColumns: '36px 130px 1fr 90px 90px 110px',
+                  gridTemplateColumns: '36px 130px 1fr 80px 80px 90px 90px',
                   gap: 14, alignItems: 'center',
                   padding: '12px 22px',
                   borderTop: i === 0 ? 'none' : '1px solid var(--line, #e7eaf0)',
@@ -192,6 +194,11 @@ export default function InsightsPage() {
                     label="Kept rate"
                     value={keptRate == null ? '—' : `${keptRate}%`}
                     color={keptRate == null ? undefined : keptRate >= 70 ? 'sage' : keptRate < 40 ? 'rust' : 'amber'}
+                  />
+                  <Stat
+                    label="On time"
+                    value={row.on_time_rate == null ? '—' : `${row.on_time_rate}%`}
+                    color={row.on_time_rate == null ? undefined : row.on_time_rate >= 70 ? 'sage' : row.on_time_rate < 40 ? 'rust' : 'amber'}
                   />
                 </div>
               );

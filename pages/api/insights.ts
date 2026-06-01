@@ -80,6 +80,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
          promises AS (
            SELECT exec,
                   SUM(CASE WHEN status = 'Kept'   THEN 1 ELSE 0 END)::int AS kept,
+                  -- On time: kept AND settled on or before the promised day.
+                  SUM(CASE WHEN status = 'Kept' AND "settledOn"::date <= "expectedBy"::date THEN 1 ELSE 0 END)::int AS kept_on_time,
                   SUM(CASE WHEN status = 'Broken' THEN 1 ELSE 0 END)::int AS broken,
                   SUM(CASE WHEN status = 'Open'   THEN 1 ELSE 0 END)::int AS open,
                   COUNT(*)::int AS total
@@ -98,6 +100,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
            COALESCE(r.recovered, 0)::numeric        AS recovered,
            COALESCE(c.calls, 0)::int                AS calls,
            COALESCE(p.kept, 0)::int                 AS promises_kept,
+           COALESCE(p.kept_on_time, 0)::int         AS promises_kept_on_time,
            COALESCE(p.broken, 0)::int               AS promises_broken,
            COALESCE(p.open, 0)::int                 AS promises_open,
            COALESCE(p.total, 0)::int                AS promises_total,
@@ -213,11 +216,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       n + (p.status === 'Kept' ? Number(p.count) : 0), 0);
     const keptRate = totalSettled === 0 ? null : Math.round((totalKept / totalSettled) * 100);
 
-    // Compute per-exec kept-rate
+    // Compute per-exec kept-rate AND on-time rate (kept by the promised date ÷
+    // everything that came due). Both null when nothing settled in the window.
     const leaderboardWithRates = (leaderboard || []).map((row: any) => {
       const settled = Number(row.promises_kept) + Number(row.promises_broken);
       const keptPct = settled === 0 ? null : Math.round(Number(row.promises_kept) / settled * 100);
-      return { ...row, kept_rate: keptPct };
+      const onTimePct = settled === 0 ? null : Math.round(Number(row.promises_kept_on_time) / settled * 100);
+      return { ...row, kept_rate: keptPct, on_time_rate: onTimePct };
     });
 
     return res.json({

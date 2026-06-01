@@ -16,6 +16,7 @@ import { useConfirm } from '../../components/ConfirmProvider';
 import { fmtRelative, fmtDateTime } from '../../lib/fmt';
 import { ROLES, ROLE_SLUGS, roleLabel, type RoleSlug } from '../../lib/roles';
 import { VIEWS, canAccessView, canEditView } from '../../lib/views';
+import { applyRoleDefaults } from '../../lib/roledefaults';
 
 type Role = RoleSlug;
 
@@ -80,7 +81,9 @@ export default function UsersAuthPage() {
   const [users, setUsers] = useState<User[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [editTarget, setEditTarget] = useState<User | 'new' | null>(null);
-  const [tab, setTab] = useState<'roster' | 'matrix' | 'deactivated'>('roster');
+  const [tab, setTab] = useState<'roster' | 'matrix' | 'role-defaults' | 'deactivated'>('roster');
+  // Live, owner-editable per-role default views (from /api/role-defaults).
+  const [roleDefaults, setRoleDefaults] = useState<Record<string, string[]> | null>(null);
   const confirm = useConfirm();
 
   function load() {
@@ -92,7 +95,20 @@ export default function UsersAuthPage() {
       })
       .catch(e => setError(e.message));
   }
-  useEffect(load, []);
+  function loadRoleDefaults() {
+    return fetch('/api/role-defaults')
+      .then(r => r.json())
+      .then(r => {
+        if (r?.ok && r.defaults) {
+          setRoleDefaults(r.defaults);
+          // Warm the client-side cache so the access matrix + "Role default"
+          // button reflect the live overrides, not the hard-coded defaults.
+          applyRoleDefaults(r.defaults);
+        }
+      })
+      .catch(() => {});
+  }
+  useEffect(() => { load(); loadRoleDefaults(); }, []);
 
   // Fire-and-reload a single-field PATCH for imperative security actions.
   async function patchUser(id: string, patch: Record<string, any>) {
@@ -196,6 +212,7 @@ export default function UsersAuthPage() {
       <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
         <TabBtn active={tab === 'roster'} onClick={() => setTab('roster')}>Roster</TabBtn>
         <TabBtn active={tab === 'matrix'} onClick={() => setTab('matrix')}>Access matrix</TabBtn>
+        <TabBtn active={tab === 'role-defaults'} onClick={() => setTab('role-defaults')}>Role defaults</TabBtn>
         <TabBtn active={tab === 'deactivated'} onClick={() => setTab('deactivated')}>
           Deactivated{inactiveUsers.length > 0 ? ` (${inactiveUsers.length})` : ''}
         </TabBtn>
@@ -276,6 +293,13 @@ export default function UsersAuthPage() {
 
       {tab === 'matrix' && <AccessMatrix users={users} />}
 
+      {tab === 'role-defaults' && (
+        <RoleDefaultsEditor
+          defaults={roleDefaults}
+          onSaved={() => { loadRoleDefaults(); load(); }}
+        />
+      )}
+
       {tab === 'deactivated' && (
         inactiveUsers.length === 0 ? (
           <div style={{
@@ -337,6 +361,7 @@ export default function UsersAuthPage() {
         <UserEditModal
           mode={editTarget === 'new' ? 'create' : 'edit'}
           user={editTarget === 'new' ? null : editTarget}
+          roleDefaults={roleDefaults}
           onClose={() => setEditTarget(null)}
           onSaved={() => { setEditTarget(null); load(); }}
           onUnlock={unlockUser}
@@ -349,10 +374,11 @@ export default function UsersAuthPage() {
 
 // ─── User edit / create modal ────────────────────────────────
 function UserEditModal({
-  mode, user, onClose, onSaved, onUnlock, onResetMfa,
+  mode, user, roleDefaults, onClose, onSaved, onUnlock, onResetMfa,
 }: {
   mode: 'edit' | 'create';
   user: User | null;
+  roleDefaults: Record<string, string[]> | null;
   onClose: () => void;
   onSaved: () => void;
   onUnlock: (u: User) => void;
@@ -401,7 +427,13 @@ function UserEditModal({
   function setAll() { setVisible(new Set(VIEWS.map(v => v.key))); }
   function setNone() { setVisible(new Set()); setReadonly(new Set()); }
   function setRoleDefault() {
-    setVisible(new Set(VIEWS.filter(v => v.roles.includes(role)).map(v => v.key)));
+    // Prefer the LIVE, owner-edited role defaults; fall back to the
+    // hard-coded VIEWS defaults if they haven't loaded yet.
+    const live = roleDefaults?.[role];
+    const keys = live && live.length >= 0 && roleDefaults && (role in roleDefaults)
+      ? live
+      : VIEWS.filter(v => v.roles.includes(role)).map(v => v.key);
+    setVisible(new Set(keys));
     setReadonly(new Set());
   }
 
@@ -724,6 +756,130 @@ function AccessMatrix({ users }: { users: User[] }) {
           </tbody>
         </table>
       </div>
+    </div>
+  );
+}
+
+// ─── Role defaults editor (live, owner-editable per-role access) ──
+// Sets the DEFAULT pages each role can see. Saving applies immediately to
+// everyone on that role who doesn't have their own custom permissions
+// (set via Edit → those still win). Dashboard / My Profile / Messages are
+// always available to every role and aren't shown here.
+const ALWAYS_ON_VIEWS = new Set(['dashboard', 'profile', 'messages']);
+
+function RoleDefaultsEditor({
+  defaults, onSaved,
+}: {
+  defaults: Record<string, string[]> | null;
+  onSaved: () => void;
+}) {
+  const [role, setRole] = useState<Role>('accounts');
+  const [sel, setSel] = useState<Set<string>>(new Set());
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [savedFlash, setSavedFlash] = useState(false);
+
+  // Reset the working copy whenever the role changes or fresh defaults load.
+  useEffect(() => {
+    if (defaults) setSel(new Set(defaults[role] || []));
+    setSavedFlash(false);
+  }, [defaults, role]);
+
+  if (!defaults) {
+    return <div style={{ padding: 24, color: 'var(--t-3)', fontSize: 13 }}>Loading role defaults…</div>;
+  }
+
+  const editableViews = VIEWS.filter(v => !ALWAYS_ON_VIEWS.has(v.key));
+  const isOwner = role === 'owner';
+  const baseline = [...(defaults[role] || [])].sort();
+  const dirty = JSON.stringify(Array.from(sel).filter(k => !ALWAYS_ON_VIEWS.has(k)).sort()) !== JSON.stringify(baseline.filter(k => !ALWAYS_ON_VIEWS.has(k)));
+
+  function toggle(key: string) {
+    setSel(prev => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n; });
+    setSavedFlash(false);
+  }
+
+  async function save() {
+    setSaving(true); setErr(null);
+    try {
+      // Keep the always-on views in the saved set so the stored defaults are
+      // complete (they're force-allowed anyway, but storing them avoids drift).
+      const views = Array.from(new Set([...Array.from(sel), ...Array.from(ALWAYS_ON_VIEWS)]))
+        .filter(k => VIEWS.some(v => v.key === k));
+      const r = await fetch('/api/role-defaults', {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ role, views }),
+      }).then(x => x.json());
+      if (!r?.ok) throw new Error(r?.error || 'Save failed');
+      setSavedFlash(true);
+      onSaved();
+    } catch (e: any) { setErr(e.message); } finally { setSaving(false); }
+  }
+
+  return (
+    <div style={{ background: '#fff', border: '1px solid var(--line, #e7eaf0)', borderRadius: 14, padding: 20 }}>
+      <div style={{ display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap', marginBottom: 16 }}>
+        <label style={{ fontSize: 10, letterSpacing: '.18em', textTransform: 'uppercase', color: 'var(--t-3)', fontWeight: 700 }}>Role</label>
+        <select
+          value={role}
+          onChange={e => setRole(e.target.value as Role)}
+          style={{
+            minWidth: 220, padding: '9px 12px', borderRadius: 8,
+            border: '1px solid var(--line-2, #d0d6e0)', background: '#fff',
+            fontSize: 13.5, fontWeight: 600, color: 'var(--navy-deep)', cursor: 'pointer',
+          }}
+        >
+          {ROLES.filter(r => r.slug !== 'owner').map(r => (
+            <option key={r.slug} value={r.slug}>{r.label}</option>
+          ))}
+          <option value="owner">Owner</option>
+        </select>
+        <span style={{ fontSize: 12, color: 'var(--t-3)' }}>
+          Sets the pages this role sees by default. Applies to everyone on the role except people you've custom-set in Edit.
+        </span>
+        <span style={{ marginLeft: 'auto', display: 'inline-flex', gap: 10, alignItems: 'center' }}>
+          {savedFlash && !dirty && <span style={{ fontSize: 12, color: 'var(--sage)', fontWeight: 700 }}>Saved ✓</span>}
+          <button
+            onClick={save}
+            disabled={isOwner || saving || !dirty}
+            style={{
+              padding: '9px 18px', borderRadius: 8, border: 'none',
+              background: (isOwner || saving || !dirty) ? 'rgba(15,40,85,0.25)' : 'linear-gradient(180deg,#1A3F7E,#0F2855)',
+              color: '#fff', fontSize: 11, fontWeight: 700, letterSpacing: '.16em', textTransform: 'uppercase',
+              cursor: (isOwner || saving || !dirty) ? 'not-allowed' : 'pointer',
+            }}
+          >{saving ? 'Saving…' : 'Save'}</button>
+        </span>
+      </div>
+
+      {isOwner ? (
+        <div style={{ padding: 16, background: 'var(--bg-2, #f6f8fb)', borderRadius: 10, fontSize: 13, color: 'var(--t-2)' }}>
+          The Owner always sees every page — this can't be narrowed (it's the root of trust). Pick another role to edit its defaults.
+        </div>
+      ) : (
+        <>
+          <div style={{ fontSize: 11.5, color: 'var(--t-3)', marginBottom: 10 }}>
+            Dashboard, My Profile and Messages are always available to every role and aren't listed here.
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 8 }}>
+            {editableViews.map(v => {
+              const on = sel.has(v.key);
+              return (
+                <label key={v.key} style={{
+                  display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', borderRadius: 8,
+                  border: '1px solid var(--line, #e7eaf0)', cursor: 'pointer',
+                  background: on ? 'rgba(46,125,92,.08)' : '#fff',
+                }}>
+                  <input type="checkbox" checked={on} onChange={() => toggle(v.key)} />
+                  <span style={{ fontSize: 13, color: 'var(--navy-deep)', fontWeight: on ? 600 : 400 }}>{v.label}</span>
+                </label>
+              );
+            })}
+          </div>
+        </>
+      )}
+
+      {err && <div style={{ marginTop: 12, fontSize: 12, color: 'var(--rust)' }}>{err}</div>}
     </div>
   );
 }

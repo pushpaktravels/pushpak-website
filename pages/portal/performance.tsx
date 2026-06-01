@@ -11,7 +11,9 @@ type ExecStat = {
   accountsTouched: number;
   promisesAdded: number;
   promisesKept: number;
+  promisesKeptOnTime: number;
   promisesBroken: number;
+  onTimePct: number | null;
   recovered: number;
   recoveryCount: number;
 };
@@ -71,6 +73,7 @@ export default function PerformancePage() {
                 <Th align="right">Accounts touched</Th>
                 <Th align="right">Promises added</Th>
                 <Th align="right">Kept</Th>
+                <Th align="right">On time</Th>
                 <Th align="right">Broken</Th>
                 <Th align="right">Recovered</Th>
               </tr>
@@ -89,6 +92,14 @@ export default function PerformancePage() {
                     <Td align="right" mono>
                       <span style={{ color: 'var(--sage)' }}>{e.promisesKept}</span>
                       {keptRate != null && <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--t-3)' }}>({keptRate}%)</span>}
+                    </Td>
+                    <Td align="right" mono>
+                      {e.onTimePct == null
+                        ? <span style={{ color: 'var(--t-3)' }}>—</span>
+                        : <span style={{ fontWeight: 700, color: e.onTimePct >= 80 ? 'var(--sage)' : e.onTimePct >= 50 ? '#C98A14' : 'var(--rust)' }}>
+                            {e.onTimePct}%
+                            <div style={{ fontSize: 10, fontWeight: 400, color: 'var(--t-3)' }}>{e.promisesKeptOnTime}/{e.promisesKept + e.promisesBroken}</div>
+                          </span>}
                     </Td>
                     <Td align="right" mono><span style={{ color: 'var(--rust)' }}>{e.promisesBroken}</span></Td>
                     <Td align="right" mono><strong style={{ color: 'var(--sage)' }}>{fmtINR(e.recovered)}</strong>

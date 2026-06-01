@@ -34,6 +34,7 @@
 // ============================================================
 import type { NextApiResponse } from 'next';
 import { ROLE_SLUGS, INSIGHTS_ONLY_EXEC_IDS } from './roles';
+import { roleHasDefaultView } from './roledefaults';
 
 export type ViewRow = { key: string; label: string; roles: string[] };
 
@@ -125,8 +126,11 @@ export function canAccessView(user: ViewUser, key: string): boolean {
   if (user.viewPerms && user.viewPerms.length > 0) {
     return user.viewPerms.includes(key);
   }
-  // No per-user override → the view's default roles decide.
-  return v.roles.includes(user.role);
+  // No per-user override → the role's default views decide. These are
+  // owner-editable & live (lib/roledefaults.ts), warmed each request by
+  // requireAuth; they fall back to this view's hard-coded roles[] if the
+  // cache is cold or the DB read failed, so access never breaks.
+  return roleHasDefaultView(user.role, key);
 }
 
 // Drop-in API gate: returns true if allowed, else sends 403 and returns
