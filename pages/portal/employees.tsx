@@ -5,7 +5,7 @@
 // shift, joining date), import the master sheet, and review proposed
 // machine-code ↔ employee matches.
 // ============================================================
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { AppShell } from '../../components/AppShell';
 
 type Employee = {
@@ -61,7 +61,35 @@ function EmployeesInner() {
   const [importMsg, setImportMsg] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [showInactive, setShowInactive] = useState(false);
+  // Per-column filters (tucked inside each header cell). Empty string = "All".
+  const [filters, setFilters] = useState({
+    name: '', hrCode: '', machine: '', login: '',
+    dept: '', shift: '', weeklyOff: '', salary: '', status: '',
+  });
+  const setFilter = (k: keyof typeof filters, v: string) =>
+    setFilters(f => ({ ...f, [k]: v }));
+  const clearFilters = () => {
+    setFilters({ name: '', hrCode: '', machine: '', login: '', dept: '', shift: '', weeklyOff: '', salary: '', status: '' });
+    setSearch('');
+  };
+  const anyFilter = !!search.trim() || Object.values(filters).some(Boolean);
   const fileRef = useRef<HTMLInputElement | null>(null);
+
+  // Distinct dropdown options, derived from the loaded rows.
+  const shiftLabel = (e: Employee) => (e.shiftIn && e.shiftOut ? `${e.shiftIn}–${e.shiftOut}` : '');
+  const deptOpts = useMemo(
+    () => Array.from(new Set(employees.map(e => e.department).filter(Boolean) as string[])).sort(),
+    [employees]
+  );
+  const shiftOpts = useMemo(
+    () => Array.from(new Set(employees.map(shiftLabel).filter(Boolean))).sort(),
+    [employees]
+  );
+  const weeklyOffOpts = useMemo(
+    () => Array.from(new Set(employees.map(e => DAYS[e.weeklyOffDay]).filter(Boolean)))
+      .sort((a, b) => DAYS.indexOf(a) - DAYS.indexOf(b)),
+    [employees]
+  );
 
   async function load() {
     setLoading(true); setError(null);
@@ -80,10 +108,28 @@ function EmployeesInner() {
 
   const q = search.trim().toLowerCase();
   const visible = employees.filter(e => {
-    if (!showInactive && !e.active) return false;
-    if (!q) return true;
-    return [e.name, e.hrCode, e.machineCode, e.department, e.designation, e.loginExecId]
-      .some(v => (v ?? '').toLowerCase().includes(q));
+    // Active/exited visibility — the Status column filter wins when set,
+    // otherwise the "Show exited" checkbox governs.
+    if (filters.status === 'active' && !e.active) return false;
+    if (filters.status === 'exited' && e.active) return false;
+    if (!filters.status && !showInactive && !e.active) return false;
+
+    // Global search box (matches across several fields).
+    if (q && ![e.name, e.hrCode, e.machineCode, e.department, e.designation, e.loginExecId]
+      .some(v => (v ?? '').toLowerCase().includes(q))) return false;
+
+    // Per-column filters (AND-combined).
+    if (filters.name && !e.name.toLowerCase().includes(filters.name.toLowerCase())) return false;
+    if (filters.hrCode && !e.hrCode.toLowerCase().includes(filters.hrCode.toLowerCase())) return false;
+    if (filters.machine && !(e.machineCode ?? '').toLowerCase().includes(filters.machine.toLowerCase())) return false;
+    if (filters.login === 'linked' && !e.loginExecId) return false;
+    if (filters.login === 'unlinked' && e.loginExecId) return false;
+    if (filters.dept && (e.department ?? '') !== filters.dept) return false;
+    if (filters.shift && shiftLabel(e) !== filters.shift) return false;
+    if (filters.weeklyOff && (DAYS[e.weeklyOffDay] ?? '') !== filters.weeklyOff) return false;
+    if (filters.salary === 'has' && !(Number(e.monthlySalary) > 0)) return false;
+    if (filters.salary === 'none' && Number(e.monthlySalary) > 0) return false;
+    return true;
   });
 
   async function importMaster(file: File) {
@@ -181,6 +227,11 @@ function EmployeesInner() {
           <input type="checkbox" checked={showInactive} onChange={e => setShowInactive(e.target.checked)} />
           Show exited employees
         </label>
+        {anyFilter && (
+          <button onClick={clearFilters} style={{ ...btnLink, color: 'var(--rust, #B5483D)' }}>
+            Clear filters
+          </button>
+        )}
       </div>
 
       {error && <Banner kind="error">{error}</Banner>}
@@ -200,10 +251,56 @@ function EmployeesInner() {
         <div style={{ overflowX: 'auto', borderRadius: 12, border: '1px solid rgba(15,40,85,0.10)' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
             <thead>
-              <tr style={{ background: 'rgba(15,40,85,0.04)', textAlign: 'left' }}>
-                {['Name', 'HR Code', 'Machine', 'Login', 'Dept', 'Shift', 'Weekly Off', 'Salary', 'Status', ''].map(h => (
-                  <th key={h} style={th}>{h}</th>
-                ))}
+              <tr style={{ background: 'rgba(15,40,85,0.04)', textAlign: 'left', verticalAlign: 'top' }}>
+                <th style={th}>Name
+                  <input style={filterInp} value={filters.name} onChange={e => setFilter('name', e.target.value)} placeholder="filter…" />
+                </th>
+                <th style={th}>HR Code
+                  <input style={filterInp} value={filters.hrCode} onChange={e => setFilter('hrCode', e.target.value)} placeholder="filter…" />
+                </th>
+                <th style={th}>Machine
+                  <input style={filterInp} value={filters.machine} onChange={e => setFilter('machine', e.target.value)} placeholder="filter…" />
+                </th>
+                <th style={th}>Login
+                  <select style={filterInp} value={filters.login} onChange={e => setFilter('login', e.target.value)}>
+                    <option value="">All</option>
+                    <option value="linked">Linked</option>
+                    <option value="unlinked">Not linked</option>
+                  </select>
+                </th>
+                <th style={th}>Dept
+                  <select style={filterInp} value={filters.dept} onChange={e => setFilter('dept', e.target.value)}>
+                    <option value="">All</option>
+                    {deptOpts.map(d => <option key={d} value={d}>{d}</option>)}
+                  </select>
+                </th>
+                <th style={th}>Shift
+                  <select style={filterInp} value={filters.shift} onChange={e => setFilter('shift', e.target.value)}>
+                    <option value="">All</option>
+                    {shiftOpts.map(s => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </th>
+                <th style={th}>Weekly Off
+                  <select style={filterInp} value={filters.weeklyOff} onChange={e => setFilter('weeklyOff', e.target.value)}>
+                    <option value="">All</option>
+                    {weeklyOffOpts.map(d => <option key={d} value={d}>{d}</option>)}
+                  </select>
+                </th>
+                <th style={th}>Salary
+                  <select style={filterInp} value={filters.salary} onChange={e => setFilter('salary', e.target.value)}>
+                    <option value="">All</option>
+                    <option value="has">Has salary</option>
+                    <option value="none">No salary</option>
+                  </select>
+                </th>
+                <th style={th}>Status
+                  <select style={filterInp} value={filters.status} onChange={e => setFilter('status', e.target.value)}>
+                    <option value="">All</option>
+                    <option value="active">Active</option>
+                    <option value="exited">Exited</option>
+                  </select>
+                </th>
+                <th style={th}></th>
               </tr>
             </thead>
             <tbody>
@@ -458,6 +555,8 @@ function Banner({ kind, children }: { kind: 'error' | 'info'; children: React.Re
 const th: React.CSSProperties = { padding: '10px 12px', fontSize: 11, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--ink-soft)' };
 const td: React.CSSProperties = { padding: '10px 12px', color: 'var(--ink)' };
 const inp: React.CSSProperties = { padding: '8px 10px', borderRadius: 8, border: '1px solid rgba(15,40,85,0.2)', fontSize: 13, width: '100%', boxSizing: 'border-box' };
+// Compact filter control tucked under each column title in the header cell.
+const filterInp: React.CSSProperties = { display: 'block', marginTop: 6, padding: '4px 6px', borderRadius: 6, border: '1px solid rgba(15,40,85,0.2)', background: '#fff', fontSize: 11, fontWeight: 400, letterSpacing: 0, textTransform: 'none', color: 'var(--ink)', width: '100%', minWidth: 70, boxSizing: 'border-box' };
 const btnPrimary: React.CSSProperties = { padding: '9px 18px', borderRadius: 8, background: 'linear-gradient(180deg,#1A3F7E,#0F2855)', color: '#fff', border: 'none', fontSize: 12.5, fontWeight: 700, cursor: 'pointer' };
 const btnSecondary: React.CSSProperties = { padding: '9px 18px', borderRadius: 8, background: '#fff', color: 'var(--ink)', border: '1px solid rgba(15,40,85,0.22)', fontSize: 12.5, fontWeight: 600, cursor: 'pointer' };
 const btnLink: React.CSSProperties = { background: 'transparent', border: 'none', color: 'var(--navy-deep, #1A3F7E)', cursor: 'pointer', fontSize: 12.5, fontWeight: 700 };
