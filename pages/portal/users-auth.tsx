@@ -66,7 +66,13 @@ const ROLE_META: Record<string, { bg: string; fg: string }> = {
 const ROLE_NEUTRAL = { bg: 'rgba(100,116,139,.14)', fg: '#475569' };
 
 function visibleCount(u: User): number {
-  if (u.viewPerms && u.viewPerms.length > 0) return u.viewPerms.length;
+  if (u.viewPerms && u.viewPerms.length > 0) {
+    // Count only distinct keys that still exist in the view catalog, so a
+    // duplicate grant or a stale/removed view can never inflate the number
+    // past VIEWS.length (which is what produced the impossible "34 / 33").
+    const validKeys = new Set(VIEWS.map(v => v.key));
+    return new Set(u.viewPerms.filter(k => validKeys.has(k))).size;
+  }
   return VIEWS.filter(v => v.roles.includes(u.role)).length;
 }
 
