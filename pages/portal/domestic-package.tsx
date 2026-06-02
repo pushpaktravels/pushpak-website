@@ -1,23 +1,11 @@
 // ============================================================
-// /portal/domestic-package — Domestic Package department (placeholder).
+// /portal/domestic-package — Domestic Package desk.
 // ============================================================
-// Reserved home for the domestic holidays / tour-package desk. The
-// route, role and sidebar entry are wired; the workspace is next.
+// India holiday / tour-package workspace. Renders the shared PackageDesk
+// component scoped to the 'domestic-package' department.
 // ============================================================
-import { ComingSoon } from '../../components/ComingSoon';
+import { PackageDesk } from '../../components/PackageDesk';
 
 export default function DomesticPackagePage() {
-  return (
-    <ComingSoon
-      title="Domestic Package"
-      crumb="Domestic Package"
-      blurb="The workspace for India holiday packages — itineraries, quotes and bookings — is being built. Your access is already set up; the tools land here soon."
-      planned={[
-        'Build & price domestic tour itineraries',
-        'Send quotations to clients',
-        'Track package bookings & payments',
-        'Coordinate hotels, transport & sightseeing vendors',
-      ]}
-    />
-  );
+  return <PackageDesk department="domestic-package" title="Domestic Package" crumb="Domestic Package" />;
 }

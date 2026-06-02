@@ -825,3 +825,43 @@ model VisaApplication {
   @@index([assigneeExecId])
   @@index([country])
 }
+
+// ─── PACKAGE DESKS ────────────────────────────────────────────
+// One row per holiday / tour package the desk is quoting or running.
+// Shared by BOTH package departments — the `department` discriminator
+// ('domestic-package' | 'international-packages') keeps each desk's list
+// separate while reusing one model, API and workspace. Lifecycle is a
+// stage pipeline (enquiry → quoted → confirmed → vouchers_sent →
+// travelling → completed / cancelled). The departure date drives a
+// voucher-prep reminder Task (kind 'package_voucher') via lib/packages;
+// a won Lead converts into one of these (Lead.convertedType = 'package').
+model Package {
+  id              String    @id @default(cuid())
+  title           String // e.g. "Bali 5N/6D — Sharma family"
+  department      String // 'domestic-package' | 'international-packages'
+  customerName    String
+  contact         String?
+  email           String?
+  destination     String? // headline destination / region
+  paxCount        Int       @default(1)
+  travelStart     DateTime?
+  travelEnd       DateTime?
+  stage           String    @default("enquiry") // enquiry | quoted | confirmed | vouchers_sent | travelling | completed | cancelled
+  priority        String    @default("normal")
+  packageCost     Decimal   @default(0) @db.Decimal(12, 2) // total price to client
+  amountCollected Decimal   @default(0) @db.Decimal(12, 2)
+  vendor          String? // DMC / hotel / land operator
+  refNo           String? // booking / file reference
+  assigneeExecId  String?
+  assigneeName    String?
+  leadId          String? // originating Lead, if converted from the pipeline
+  notes           String?   @db.Text
+  createdBy       String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([stage])
+  @@index([department])
+  @@index([travelStart])
+  @@index([assigneeExecId])
+}
