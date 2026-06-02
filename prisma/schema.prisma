@@ -787,3 +787,41 @@ model Lead {
   @@index([assigneeExecId])
   @@index([source])
 }
+
+// ─── VISA DESK ────────────────────────────────────────────────
+// One row per visa application the desk is working. The lifecycle is a
+// stage pipeline (enquiry → documentation → appointment → submitted →
+// processing → approved/rejected → delivered). The appointment date
+// drives an auto reminder Task (kind 'visa_appointment') via lib/visa;
+// a won Lead converts into one of these (Lead.convertedType = 'visa').
+model VisaApplication {
+  id              String    @id @default(cuid())
+  applicantName   String // primary traveller on the application
+  passportNo      String?
+  contact         String? // phone
+  email           String?
+  nationality     String?   @default("Indian")
+  country         String // destination country / visa authority (e.g. "Schengen", "USA")
+  visaType        String    @default("tourist") // tourist | business | student | work | transit | medical | other
+  stage           String    @default("enquiry") // enquiry | documentation | appointment | submitted | processing | approved | rejected | delivered
+  priority        String    @default("normal")
+  appointmentAt   DateTime? // embassy / VFS appointment — drives the reminder Task
+  submittedAt     DateTime? // handed to the embassy / VFS
+  decisionAt      DateTime? // approved / rejected stamp
+  fee             Decimal   @default(0) @db.Decimal(12, 2) // total charge to client
+  amountCollected Decimal   @default(0) @db.Decimal(12, 2)
+  vendor          String? // VFS / embassy / sub-agent
+  refNo           String? // application / tracking reference
+  assigneeExecId  String? // owning desk agent (drives "My Worklist")
+  assigneeName    String?
+  leadId          String? // originating Lead, if converted from the pipeline
+  notes           String?   @db.Text
+  createdBy       String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([stage])
+  @@index([appointmentAt])
+  @@index([assigneeExecId])
+  @@index([country])
+}
