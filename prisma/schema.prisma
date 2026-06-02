@@ -693,6 +693,9 @@ model Reservation {
   travelDate      DateTime?
   fareAmount      Decimal   @default(0) @db.Decimal(12, 2)
   amountCollected Decimal   @default(0) @db.Decimal(12, 2)
+  costAmount      Decimal   @default(0) @db.Decimal(12, 2) // what we pay the vendor; fare − cost = margin
+  refundAmount    Decimal   @default(0) @db.Decimal(12, 2) // refunded to client on cancellation
+  holdUntil       DateTime? // ticketing deadline while "Held" — drives the hold-clock reminder
   vendor          String?
   status          String    @default("Held") // Held | Ticketed | Cancelled
   notes           String?   @db.Text
@@ -705,6 +708,7 @@ model Reservation {
   @@index([status])
   @@index([travelDate])
   @@index([agentExecId])
+  @@index([holdUntil])
 }
 
 // ─── SHARED FOUNDATION ────────────────────────────────────────

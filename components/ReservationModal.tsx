@@ -19,6 +19,9 @@ export type Reservation = {
   travelDate: string | null;
   fareAmount: string | number;
   amountCollected: string | number;
+  costAmount: string | number;
+  refundAmount: string | number;
+  holdUntil: string | null;
   vendor: string | null;
   status: 'Held' | 'Ticketed' | 'Cancelled';
   notes: string | null;
@@ -59,6 +62,15 @@ function toDateInput(iso: string | null): string {
   return d.toISOString().slice(0, 10);
 }
 
+// HTML <input type="datetime-local"> wants YYYY-MM-DDTHH:mm in LOCAL time.
+function toDateTimeInput(iso: string | null): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  const off = d.getTimezoneOffset();
+  return new Date(d.getTime() - off * 60000).toISOString().slice(0, 16);
+}
+
 export function ReservationModal({
   mode, reservation, onClose, onSaved,
 }: {
@@ -76,6 +88,9 @@ export function ReservationModal({
   const [travelDate, setTravelDate]       = useState(toDateInput(r?.travelDate || null));
   const [fareAmount, setFareAmount]       = useState(r ? String(r.fareAmount ?? '') : '');
   const [amountCollected, setAmountCollected] = useState(r ? String(r.amountCollected ?? '') : '');
+  const [costAmount, setCostAmount]       = useState(r ? String(r.costAmount ?? '') : '');
+  const [refundAmount, setRefundAmount]   = useState(r ? String(r.refundAmount ?? '') : '');
+  const [holdUntil, setHoldUntil]         = useState(toDateTimeInput(r?.holdUntil || null));
   const [vendor, setVendor]               = useState(r?.vendor || '');
   const [pnr, setPnr]                     = useState(r?.pnr || '');
   const [status, setStatus]               = useState<Reservation['status']>(r?.status || 'Held');
@@ -101,6 +116,9 @@ export function ReservationModal({
       travelDate: travelDate || null,
       fareAmount: fare,
       amountCollected: coll,
+      costAmount: Number(costAmount || 0),
+      refundAmount: Number(refundAmount || 0),
+      holdUntil: status === 'Held' ? (holdUntil || null) : null,
       vendor: vendor.trim() || null,
       pnr: pnr.trim() || null,
       status,
@@ -123,7 +141,9 @@ export function ReservationModal({
 
   const fareN = Number(fareAmount || 0);
   const collN = Number(amountCollected || 0);
+  const costN = Number(costAmount || 0);
   const dueN = Math.max(0, fareN - collN);
+  const marginN = fareN - costN;
 
   return (
     <>
@@ -184,17 +204,36 @@ export function ReservationModal({
             <Field label="Collected (₹)">
               <input type="number" min={0} value={amountCollected} onChange={e => setAmountCollected(e.target.value)} style={inputStyle} />
             </Field>
+            <Field label="Vendor cost (₹)">
+              <input type="number" min={0} value={costAmount} onChange={e => setCostAmount(e.target.value)} placeholder="what we pay the vendor" style={inputStyle} />
+            </Field>
+            {status === 'Cancelled' && (
+              <Field label="Refund to client (₹)">
+                <input type="number" min={0} value={refundAmount} onChange={e => setRefundAmount(e.target.value)} style={inputStyle} />
+              </Field>
+            )}
           </div>
-          <div style={{
-            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-            padding: '10px 14px', borderRadius: 8,
-            background: dueN > 0 ? 'rgba(181,72,61,.07)' : 'rgba(46,108,84,.08)',
-            marginBottom: 4,
-          }}>
-            <span style={{ fontSize: 12, color: 'var(--t-2)', fontWeight: 600 }}>Balance due</span>
-            <span style={{ fontSize: 15, fontWeight: 700, color: dueN > 0 ? 'var(--rust, #B5483D)' : 'var(--sage, #2E6C54)' }}>
-              ₹{dueN.toLocaleString('en-IN')}
-            </span>
+          <div style={{ display: 'flex', gap: 10, marginBottom: 4 }}>
+            <div style={{
+              flex: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+              padding: '10px 14px', borderRadius: 8,
+              background: dueN > 0 ? 'rgba(181,72,61,.07)' : 'rgba(46,108,84,.08)',
+            }}>
+              <span style={{ fontSize: 12, color: 'var(--t-2)', fontWeight: 600 }}>Balance due</span>
+              <span style={{ fontSize: 15, fontWeight: 700, color: dueN > 0 ? 'var(--rust, #B5483D)' : 'var(--sage, #2E6C54)' }}>
+                ₹{dueN.toLocaleString('en-IN')}
+              </span>
+            </div>
+            <div style={{
+              flex: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+              padding: '10px 14px', borderRadius: 8,
+              background: marginN < 0 ? 'rgba(181,72,61,.07)' : 'rgba(46,108,84,.08)',
+            }}>
+              <span style={{ fontSize: 12, color: 'var(--t-2)', fontWeight: 600 }}>Margin</span>
+              <span style={{ fontSize: 15, fontWeight: 700, color: marginN < 0 ? 'var(--rust, #B5483D)' : 'var(--sage, #2E6C54)' }}>
+                ₹{marginN.toLocaleString('en-IN')}
+              </span>
+            </div>
           </div>
           <Field label="Vendor">
             <input value={vendor} onChange={e => setVendor(e.target.value)} placeholder="optional" style={inputStyle} />
@@ -202,12 +241,24 @@ export function ReservationModal({
 
           <hr style={divStyle} />
           <SectionLabel>Status</SectionLabel>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 14 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
             <Field label="Booking status">
               <select value={status} onChange={e => setStatus(e.target.value as Reservation['status'])} style={inputStyle}>
                 {RES_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
               </select>
             </Field>
+            {status === 'Held' && (
+              <Field label="Hold until (ticketing deadline)">
+                <input type="datetime-local" value={holdUntil} onChange={e => setHoldUntil(e.target.value)} style={inputStyle} />
+              </Field>
+            )}
+          </div>
+          {status === 'Held' && (
+            <div style={{ fontSize: 11.5, color: 'var(--t-2)', margin: '-4px 0 12px', lineHeight: 1.5 }}>
+              Setting a deadline drops an <strong>urgent hold-clock reminder</strong> into your Tasks — it clears automatically once you ticket or cancel.
+            </div>
+          )}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 14 }}>
             <Field label="Notes">
               <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={3}
                 style={{ ...inputStyle, resize: 'vertical' }} placeholder="optional" />

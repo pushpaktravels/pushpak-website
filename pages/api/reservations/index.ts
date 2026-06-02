@@ -16,6 +16,7 @@ import { query, queryOne, newId } from '@/lib/pg';
 import { requireAuth } from '@/lib/auth';
 import { requireView, requireViewEdit } from '@/lib/views';
 import { audit } from '@/lib/audit';
+import { syncHoldTask } from '@/lib/reservations';
 
 const STATUSES = ['Held', 'Ticketed', 'Cancelled'] as const;
 
@@ -28,6 +29,9 @@ const CreateBody = z.object({
   travelDate:      z.string().optional().nullable(),     // ISO date string
   fareAmount:      z.coerce.number().min(0).max(1e9).default(0),
   amountCollected: z.coerce.number().min(0).max(1e9).default(0),
+  costAmount:      z.coerce.number().min(0).max(1e9).default(0),
+  refundAmount:    z.coerce.number().min(0).max(1e9).default(0),
+  holdUntil:       z.string().optional().nullable(),     // ticketing deadline (ISO)
   vendor:          z.string().max(120).optional().nullable(),
   pnr:             z.string().max(20).optional().nullable(),
   status:          z.enum(STATUSES).default('Held'),
@@ -118,21 +122,33 @@ async function create(req: NextApiRequest, res: NextApiResponse, user: any) {
   if (travelDate && isNaN(travelDate.getTime())) {
     return res.status(400).json({ ok: false, error: 'Invalid travel date' });
   }
+  const holdUntil = b.holdUntil ? new Date(b.holdUntil) : null;
+  if (holdUntil && isNaN(holdUntil.getTime())) {
+    return res.status(400).json({ ok: false, error: 'Invalid hold deadline' });
+  }
 
   try {
     await query(
       `INSERT INTO "Reservation"
         (id, pnr, "passengerName", "paxCount", contact, sector, airline,
-         "travelDate", "fareAmount", "amountCollected", vendor, status, notes,
+         "travelDate", "fareAmount", "amountCollected", "costAmount", "refundAmount",
+         "holdUntil", vendor, status, notes,
          "agentExecId", "agentName", "createdBy", "createdAt", "updatedAt")
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,NOW(),NOW())`,
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,NOW(),NOW())`,
       [
         id, b.pnr || null, b.passengerName, b.paxCount, b.contact || null,
         b.sector, b.airline || null, travelDate ? travelDate.toISOString() : null,
-        b.fareAmount, b.amountCollected, b.vendor || null, b.status, b.notes || null,
+        b.fareAmount, b.amountCollected, b.costAmount, b.refundAmount,
+        holdUntil ? holdUntil.toISOString() : null, b.vendor || null, b.status, b.notes || null,
         user.execId, user.name, user.execId,
       ]
     );
+
+    // Open the hold-clock reminder if this booking is on hold.
+    await syncHoldTask({
+      id, passengerName: b.passengerName, sector: b.sector, status: b.status,
+      holdUntil, agentExecId: user.execId, agentName: user.name,
+    });
 
     audit(req, user, 'RESERVATION_CREATE', b.passengerName, {
       id, sector: b.sector, fare: b.fareAmount, status: b.status,

@@ -99,7 +99,7 @@ export default function ReservationsPage() {
             <thead>
               <tr style={{ background: 'var(--bg-2, #f6f8fb)', borderBottom: '1px solid var(--line, #e7eaf0)' }}>
                 <Th>Passenger</Th><Th>Sector</Th><Th>Travel</Th><Th>Airline</Th>
-                <Th align="right">Fare</Th><Th align="right">Due</Th><Th>Status</Th><Th>Agent</Th>
+                <Th align="right">Fare</Th><Th align="right">Margin</Th><Th align="right">Due</Th><Th>Status</Th><Th>Agent</Th>
                 <Th align="right">Actions</Th>
               </tr>
             </thead>
@@ -117,6 +117,14 @@ export default function ReservationsPage() {
                     <Td>{r.travelDate ? fmtDate(r.travelDate) : '—'}</Td>
                     <Td>{r.airline || '—'}</Td>
                     <Td align="right" mono>{fmtINR(Number(r.fareAmount))}</Td>
+                    <Td align="right" mono>
+                      {(() => {
+                        const m = Number(r.fareAmount || 0) - Number(r.costAmount || 0);
+                        return Number(r.costAmount || 0) > 0
+                          ? <span style={{ color: m < 0 ? 'var(--rust)' : 'var(--sage)', fontWeight: 600 }}>{fmtINR(m)}</span>
+                          : <span style={{ color: 'var(--t-3)' }}>—</span>;
+                      })()}
+                    </Td>
                     <Td align="right" mono>
                       <span style={{ color: d > 0 ? 'var(--rust)' : 'var(--sage)', fontWeight: d > 0 ? 700 : 400 }}>
                         {d > 0 ? fmtINR(d) : '—'}

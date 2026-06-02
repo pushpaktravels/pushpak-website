@@ -13,6 +13,8 @@ import { query, queryOne } from '@/lib/pg';
 import { requireAuth } from '@/lib/auth';
 import { requireView, requireViewEdit } from '@/lib/views';
 import { audit } from '@/lib/audit';
+import { syncHoldTask } from '@/lib/reservations';
+import { cancelOpenTasksFor } from '@/lib/tasks';
 
 const STATUSES = ['Held', 'Ticketed', 'Cancelled'] as const;
 
@@ -25,6 +27,9 @@ const PatchBody = z.object({
   travelDate:      z.string().optional().nullable(),
   fareAmount:      z.coerce.number().min(0).max(1e9).optional(),
   amountCollected: z.coerce.number().min(0).max(1e9).optional(),
+  costAmount:      z.coerce.number().min(0).max(1e9).optional(),
+  refundAmount:    z.coerce.number().min(0).max(1e9).optional(),
+  holdUntil:       z.string().optional().nullable(),
   vendor:          z.string().max(120).optional().nullable(),
   pnr:             z.string().max(20).optional().nullable(),
   status:          z.enum(STATUSES).optional(),
@@ -41,6 +46,9 @@ const COLUMN: Record<string, string> = {
   travelDate:      '"travelDate"',
   fareAmount:      '"fareAmount"',
   amountCollected: '"amountCollected"',
+  costAmount:      '"costAmount"',
+  refundAmount:    '"refundAmount"',
+  holdUntil:       '"holdUntil"',
   vendor:          'vendor',
   pnr:             'pnr',
   status:          'status',
@@ -66,6 +74,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (req.method === 'DELETE') {
     try {
       await query(`DELETE FROM "Reservation" WHERE id = $1`, [id]);
+      await cancelOpenTasksFor('reservation', id);
       audit(req, user, 'RESERVATION_DELETE', existing.passengerName, { id, sector: existing.sector });
       return res.json({ ok: true });
     } catch (err: any) {
@@ -86,10 +95,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   for (const [key, col] of Object.entries(COLUMN)) {
     if (!(key in b)) continue;
     let val: any = (b as any)[key];
-    if (key === 'travelDate') {
+    if (key === 'travelDate' || key === 'holdUntil') {
       if (val) {
         const d = new Date(val);
-        if (isNaN(d.getTime())) return res.status(400).json({ ok: false, error: 'Invalid travel date' });
+        if (isNaN(d.getTime())) return res.status(400).json({ ok: false, error: `Invalid ${key === 'travelDate' ? 'travel date' : 'hold deadline'}` });
         val = d.toISOString();
       } else {
         val = null;
@@ -116,8 +125,21 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   try {
     await query(`UPDATE "Reservation" SET ${sets.join(', ')} WHERE id = $${i}`, params);
-    audit(req, user, 'RESERVATION_UPDATE', existing.passengerName, { id, changed: Object.keys(b) });
     const row = await queryOne<any>(`SELECT * FROM "Reservation" WHERE id = $1`, [id]);
+
+    // Re-sync the hold-clock against the new state (ticketing / cancelling
+    // / clearing the deadline closes the reminder; a fresh hold opens it).
+    await syncHoldTask({
+      id,
+      passengerName: row.passengerName,
+      sector: row.sector,
+      status: row.status,
+      holdUntil: row.holdUntil,
+      agentExecId: row.agentExecId,
+      agentName: row.agentName,
+    });
+
+    audit(req, user, 'RESERVATION_UPDATE', existing.passengerName, { id, changed: Object.keys(b) });
     return res.json({ ok: true, data: { reservation: row } });
   } catch (err: any) {
     console.error('[api/reservations/[id]] patch error', err);
