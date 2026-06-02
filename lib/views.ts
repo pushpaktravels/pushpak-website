@@ -57,6 +57,11 @@ export const VIEWS: ViewRow[] = [
   // (financials + workforce + attendance + team performance). Owners
   // only by default; grantable to others via viewPerms.
   { key: 'overview',            label: 'Command Center',      roles: ['owner'] },
+  // Shared foundation — cross-department primitives every module links through.
+  // Tasks is a personal inbox (universal, like Messages); Leads is the
+  // sales pipeline shared by Marketing and the booking/visa/package desks.
+  { key: 'tasks',               label: 'Tasks',               roles: [...ROLE_SLUGS] },
+  { key: 'leads',               label: 'Leads',               roles: ['owner', 'admin', 'marketing', 'domestic-reservations', 'domestic-package', 'international-packages', 'visa'] },
   // Followup / Accounts module.
   { key: 'followup-dashboard',  label: 'Followup Dashboard',  roles: ['owner', 'admin', 'cm-accounts', 'accounts', 'insights'] },
   { key: 'worklist',            label: 'My Worklist',         roles: ['owner', 'admin', 'cm-accounts', 'accounts'] },

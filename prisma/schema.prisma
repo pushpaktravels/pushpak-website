@@ -706,3 +706,84 @@ model Reservation {
   @@index([travelDate])
   @@index([agentExecId])
 }
+
+// ─── SHARED FOUNDATION ────────────────────────────────────────
+// Two cross-department primitives that every module links through,
+// so the reservation hold-clock, visa appointments, package vouchers,
+// travel reminders and lead follow-ups all share ONE engine instead of
+// each department reinventing tasks/reminders and lead capture.
+//
+// Polymorphic linkage is intentional (relatedType + relatedId): a Task
+// or a converted Lead can point at a Reservation, a Visa application, a
+// Package, an Account, etc., without a hard FK per department. The
+// display label is denormalised (relatedLabel) so lists render without a
+// join. Both tables are queried at runtime via lib/pg (raw SQL); these
+// models exist for `prisma db push` + generated types only.
+
+// Universal task / reminder. `kind` and `status` are plain text (same
+// philosophy as User.role) so new departments add task kinds without a
+// migration. dueAt drives reminders; remindAt lets a task surface BEFORE
+// it is due (e.g. nudge 24h before a hold expires).
+model Task {
+  id            String    @id @default(cuid())
+  kind          String    @default("generic") // reservation_hold | travel_reminder | visa_appointment | package_voucher | lead_followup | promise | generic
+  title         String
+  details       String?   @db.Text
+  department    String? // owning department (role slug) — drives per-dept boards
+  status        String    @default("open") // open | in_progress | done | snoozed | cancelled
+  priority      String    @default("normal") // low | normal | high | urgent
+  dueAt         DateTime?
+  remindAt      DateTime? // when to first surface it (defaults to dueAt)
+  snoozedUntil  DateTime?
+  assigneeExecId String?
+  assigneeName  String?
+  createdBy     String?
+  // Polymorphic link to the record this task is about.
+  relatedType   String? // "reservation" | "lead" | "visa" | "package" | "account" | ...
+  relatedId     String?
+  relatedLabel  String? // denormalised display, e.g. "PNR ABZ12 · Rahul Boro"
+  meta          Json? // extra structured payload per kind
+  doneAt        DateTime?
+  doneBy        String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([status])
+  @@index([dueAt])
+  @@index([remindAt])
+  @@index([assigneeExecId])
+  @@index([department])
+  @@index([relatedType, relatedId])
+}
+
+// Cross-department lead pipeline. Marketing (or anyone) captures a lead,
+// routes it to a department, and on WIN it converts into that
+// department's record (convertedType + convertedId) — this is the seam
+// that links Marketing → Reservations / Packages / Visa.
+model Lead {
+  id             String    @id @default(cuid())
+  name           String
+  contact        String? // phone
+  email          String?
+  source         String    @default("other") // website | whatsapp | call | walkin | referral | instagram | other
+  department     String? // routed-to department (role slug)
+  stage          String    @default("new") // new | contacted | quoted | negotiating | won | lost
+  priority       String    @default("normal")
+  assigneeExecId String?
+  assigneeName   String?
+  estValue       Decimal?  @db.Decimal(12, 2)
+  notes          String?   @db.Text
+  lostReason     String?
+  // Set when stage = won and the lead becomes a real record.
+  convertedType  String? // "reservation" | "package" | "visa" | ...
+  convertedId    String?
+  createdBy      String?
+  lastActivityAt DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([stage])
+  @@index([department])
+  @@index([assigneeExecId])
+  @@index([source])
+}

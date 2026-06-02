@@ -5,7 +5,7 @@
 import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { INSIGHTS_ONLY_EXEC_IDS } from '../lib/roles';
+import { INSIGHTS_ONLY_EXEC_IDS, ROLE_SLUGS } from '../lib/roles';
 import { INSIGHTS_ONLY_VIEWS } from '../lib/views';
 
 export type CurrentUser = {
@@ -25,7 +25,7 @@ export type CurrentUser = {
 
 type Dept = 'command' | 'personal' | 'followup' | 'reservations'
   | 'domestic-package' | 'international-packages' | 'visa' | 'marketing'
-  | 'hr' | 'settings';
+  | 'pipeline' | 'hr' | 'settings';
 type NavItem = { view: string; label: string; roles: string[]; href: string; icon: ReactNode; dept: Dept };
 type NavSection = { label: string; items: NavItem[]; roles: string[] };
 
@@ -42,6 +42,7 @@ const DEPARTMENTS: { slug: Dept; label: string }[] = [
   { slug: 'international-packages',  label: 'International Packages' },
   { slug: 'visa',                   label: 'Visa' },
   { slug: 'marketing',              label: 'Marketing' },
+  { slug: 'pipeline',               label: 'Sales Pipeline' },
   { slug: 'hr',                     label: 'HR' },
   { slug: 'settings',               label: 'Settings' },
 ];
@@ -67,6 +68,7 @@ const SECTIONS: NavSection[] = [
       // preference) but is hard-gated to the owner in canSee() below — it
       // must NEVER surface to any exec. Eye icon to distinguish from chat.
       { view: 'messages-admin', label: 'Message Oversight', href: '/portal/messages-admin', roles: ['owner'], dept: 'personal', icon: <svg viewBox="0 0 24 24"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg> },
+      { view: 'tasks',     label: 'Tasks',      href: '/portal/tasks',   roles: [...ROLE_SLUGS], dept: 'personal', icon: <svg viewBox="0 0 24 24"><path d="M9 11l3 3 8-8M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg> },
       { view: 'profile',   label: 'My Profile', href: '/portal/profile', roles: ['owner','admin','cm-accounts','accounts','insights'], dept: 'personal', icon: <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg> },
     ],
   },
@@ -153,6 +155,18 @@ const SECTIONS: NavSection[] = [
     roles: ['owner', 'admin', 'marketing'],
     items: [
       { view: 'marketing', label: 'Marketing', href: '/portal/marketing', roles: ['owner','admin','marketing'], dept: 'marketing', icon: <svg viewBox="0 0 24 24"><path d="M3 11v2a1 1 0 0 0 1 1h3l5 4V6L7 10H4a1 1 0 0 0-1 1z"/><path d="M16 9a3 3 0 0 1 0 6"/></svg> },
+    ],
+  },
+
+  // ─── SALES PIPELINE (cross-department lead funnel) ────────────
+  // Leads are captured anywhere and routed to a department; on WIN they
+  // convert into that department's record. Shared by Marketing and the
+  // booking / package / visa desks.
+  {
+    label: 'Sales Pipeline',
+    roles: ['owner', 'admin', 'marketing', 'domestic-reservations', 'domestic-package', 'international-packages', 'visa'],
+    items: [
+      { view: 'leads', label: 'Leads', href: '/portal/leads', roles: ['owner','admin','marketing','domestic-reservations','domestic-package','international-packages','visa'], dept: 'pipeline', icon: <svg viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M7 13l3 3 4-5 4 4"/><circle cx="7" cy="13" r="1"/></svg> },
     ],
   },
 
