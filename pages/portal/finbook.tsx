@@ -13,6 +13,13 @@ import { useState } from 'react';
 import { AppShell } from '../../components/AppShell';
 import { fmtINR } from '../../lib/fmt';
 
+// Default window = the running Indian financial year (1 Apr → today).
+function fyStart(d = new Date()): string {
+  const y = d.getMonth() >= 3 ? d.getFullYear() : d.getFullYear() - 1; // Apr = month 3
+  return `${y}-04-01`;
+}
+const todayStr = () => new Date().toISOString().slice(0, 10);
+
 type Line = { date: string; docType: string; docNo: string; narration: string; debit: number; credit: number; balance: number; refKey?: string };
 type Ledger = { clientId: string; clientName?: string; opening: number; closing: number; lines: Line[] };
 type Limit = { clientId: string; creditLimit: number; outstanding: number; available: number; currency: string } | null;
@@ -20,6 +27,8 @@ type Resp = { mode: string; simulated: boolean; data: { ledger: Ledger; limit: L
 
 export default function FinbookPage() {
   const [clientId, setClientId] = useState('');
+  const [from, setFrom] = useState(fyStart());
+  const [to, setTo] = useState(todayStr());
   const [resp, setResp] = useState<Resp | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -28,9 +37,13 @@ export default function FinbookPage() {
     e?.preventDefault();
     const id = clientId.trim();
     if (!id) return;
+    if (from && to && from > to) { setError('“From” date is after “To” date.'); return; }
     setLoading(true); setError(null); setResp(null);
     try {
-      const r = await fetch(`/api/finbook/account?clientId=${encodeURIComponent(id)}`).then(x => x.json());
+      const qs = new URLSearchParams({ clientId: id });
+      if (from) qs.set('from', from);
+      if (to) qs.set('to', to);
+      const r = await fetch(`/api/finbook/account?${qs.toString()}`).then(x => x.json());
       if (!r?.ok) throw new Error(r?.error || 'Lookup failed');
       setResp(r as Resp);
     } catch (e: any) {
@@ -62,13 +75,19 @@ export default function FinbookPage() {
       )}
 
       {/* Lookup */}
-      <form onSubmit={lookup} style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
+      <form onSubmit={lookup} style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
         <input
           value={clientId}
           onChange={e => setClientId(e.target.value)}
           placeholder="FinBook client id (e.g. CCA000001)"
-          style={{ ...inputStyle, maxWidth: 320 }}
+          style={{ ...inputStyle, maxWidth: 280 }}
         />
+        <label style={dateLbl}>From
+          <input type="date" value={from} max={to || undefined} onChange={e => setFrom(e.target.value)} style={{ ...inputStyle, width: 'auto' }} />
+        </label>
+        <label style={dateLbl}>To
+          <input type="date" value={to} min={from || undefined} onChange={e => setTo(e.target.value)} style={{ ...inputStyle, width: 'auto' }} />
+        </label>
         <button type="submit" disabled={loading || !clientId.trim()} style={addBtn}>
           {loading ? 'LOADING…' : 'LOOK UP'}
         </button>
@@ -101,7 +120,7 @@ export default function FinbookPage() {
                 <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--t-3)', marginLeft: 8 }}>{resp.data.ledger.clientId}</span>
               </div>
               <div style={{ fontSize: 12.5, color: 'var(--t-2)' }}>
-                Opening {fmtINR(resp.data.ledger.opening)} · Closing <strong style={{ color: 'var(--navy-deep)' }}>{fmtINR(resp.data.ledger.closing)}</strong>
+                {from} → {to} · Opening {fmtINR(resp.data.ledger.opening)} · Closing <strong style={{ color: 'var(--navy-deep)' }}>{fmtINR(resp.data.ledger.closing)}</strong>
               </div>
             </div>
             {resp.data.ledger.lines.length === 0 ? (
@@ -153,6 +172,7 @@ function Td({ children, align }: { children: React.ReactNode; align?: 'left' | '
 }
 
 const inputStyle: React.CSSProperties = { width: '100%', fontSize: 14, padding: '10px 12px', border: '1px solid var(--line, #e7eaf0)', borderRadius: 8, outline: 'none', color: 'var(--navy-deep)', fontFamily: 'inherit', background: '#fff' };
+const dateLbl: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 600, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--t-3)' };
 const addBtn: React.CSSProperties = { background: 'var(--navy-deep)', color: '#fff', border: 'none', borderRadius: 10, padding: '11px 22px', fontSize: 12, fontWeight: 700, letterSpacing: '.12em', cursor: 'pointer', whiteSpace: 'nowrap' };
 const cardBox: React.CSSProperties = { background: '#fff', border: '1px solid var(--line, #e7eaf0)', borderRadius: 14, overflow: 'hidden' };
 const errBox: React.CSSProperties = { padding: 12, marginBottom: 12, color: 'var(--rust)', fontSize: 12.5, background: 'rgba(181,72,61,.08)', borderRadius: 8 };
