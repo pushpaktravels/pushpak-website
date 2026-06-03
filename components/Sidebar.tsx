@@ -95,6 +95,7 @@ const SECTIONS: NavSection[] = [
       { view: 'collections',   label: 'Collection List',    href: '/portal/collections',  roles: ['owner','admin','cm-accounts','accounts','insights'], dept: 'followup', icon: <svg viewBox="0 0 24 24"><path d="M3 6h18M3 12h18M3 18h12"/><circle cx="19" cy="18" r="2.5"/></svg> },
       { view: 'finbook',       label: 'FinBook',            href: '/portal/finbook',      roles: ['owner','admin','cm-accounts','accounts'],           dept: 'followup', icon: <svg viewBox="0 0 24 24"><path d="M4 4h16v16H4z"/><path d="M8 8h8M8 12h8M8 16h5"/></svg> },
       { view: 'card-log',      label: 'Card Bookings',      href: '/portal/card-bookings', roles: ['owner','admin','cm-accounts','accounts'],          dept: 'followup', icon: <svg viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/><path d="M6 15h4"/></svg> },
+      { view: 'vendor-pay',    label: 'Vendor Payments',    href: '/portal/vendor-payments', roles: ['owner','admin','cm-accounts','accounts'],        dept: 'followup', icon: <svg viewBox="0 0 24 24"><path d="M3 7h18v10H3z"/><path d="M3 11h18"/><circle cx="8" cy="14" r="1"/></svg> },
     ],
   },
   {

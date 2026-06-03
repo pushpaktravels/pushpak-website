@@ -100,6 +100,10 @@ export const VIEWS: ViewRow[] = [
   // will log card payments from inside the booking flow in a later step.)
   // Portal-only; no FinBook. Grant a desk via viewPerms if they adopt it.
   { key: 'card-log',            label: 'Card Bookings',       roles: ['owner', 'admin', 'cm-accounts', 'accounts'] },
+  // Vendor-payment requests — replaces the vendor Google Form + Excel. An
+  // accounts/ops screen: raise a request → manager approves → pay → bill.
+  // Portal-only; no FinBook. Approving is manager-gated server-side.
+  { key: 'vendor-pay',          label: 'Vendor Payments',     roles: ['owner', 'admin', 'cm-accounts', 'accounts'] },
   // HR module.
   { key: 'attendance',          label: 'Attendance',          roles: ['owner', 'admin', 'hr'] },
   { key: 'employees',           label: 'Employees',           roles: ['owner', 'admin', 'hr'] },
