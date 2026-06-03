@@ -95,6 +95,11 @@ export const VIEWS: ViewRow[] = [
   // FinBook accounting integration — live ledger / credit-limit lookup and
   // (later) the sync/reconciliation console. Accounts staff + oversight.
   { key: 'finbook',             label: 'FinBook',             roles: ['owner', 'admin', 'cm-accounts', 'accounts'] },
+  // Credit-card booking log — replaces the OTP Google Form + Excel. An
+  // accounts screen: the unbilled queue + the full card-spend log. (Bookers
+  // will log card payments from inside the booking flow in a later step.)
+  // Portal-only; no FinBook. Grant a desk via viewPerms if they adopt it.
+  { key: 'card-log',            label: 'Card Bookings',       roles: ['owner', 'admin', 'cm-accounts', 'accounts'] },
   // HR module.
   { key: 'attendance',          label: 'Attendance',          roles: ['owner', 'admin', 'hr'] },
   { key: 'employees',           label: 'Employees',           roles: ['owner', 'admin', 'hr'] },
