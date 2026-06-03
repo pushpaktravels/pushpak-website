@@ -92,6 +92,9 @@ export const VIEWS: ViewRow[] = [
   { key: 'international-packages',  label: 'International Packages', roles: ['owner', 'admin', 'international-packages'] },
   { key: 'visa',                   label: 'Visa',                  roles: ['owner', 'admin', 'visa'] },
   { key: 'marketing',              label: 'Marketing',             roles: ['owner', 'admin', 'marketing'] },
+  // FinBook accounting integration — live ledger / credit-limit lookup and
+  // (later) the sync/reconciliation console. Accounts staff + oversight.
+  { key: 'finbook',             label: 'FinBook',             roles: ['owner', 'admin', 'cm-accounts', 'accounts'] },
   // HR module.
   { key: 'attendance',          label: 'Attendance',          roles: ['owner', 'admin', 'hr'] },
   { key: 'employees',           label: 'Employees',           roles: ['owner', 'admin', 'hr'] },
