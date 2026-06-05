@@ -112,6 +112,12 @@ export const VIEWS: ViewRow[] = [
   // sales bill. Dry-run by default (simulated, nothing posted); the FinBook
   // chokepoint enforces the mode. Accounts + oversight.
   { key: 'billing',             label: 'Billing',             roles: ['owner', 'admin', 'cm-accounts', 'accounts'] },
+  // Forms/Queries module — replaces the loose Google Forms (Courier, Petrol…).
+  // 'query-fill' is broad: anyone may file a query (the form's own fillRoles
+  // narrow it further). 'queries' is the accounts response desk where they
+  // classify + (dry-run) push. Owner edits the form registry from there.
+  { key: 'query-fill',          label: 'Fill a Query',        roles: [...ROLE_SLUGS] },
+  { key: 'queries',             label: 'Queries',             roles: ['owner', 'admin', 'cm-accounts', 'accounts'] },
   // HR module.
   { key: 'attendance',          label: 'Attendance',          roles: ['owner', 'admin', 'hr'] },
   { key: 'employees',           label: 'Employees',           roles: ['owner', 'admin', 'hr'] },

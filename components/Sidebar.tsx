@@ -26,7 +26,10 @@ export type CurrentUser = {
 type Dept = 'command' | 'personal' | 'followup' | 'accounts' | 'reservations'
   | 'domestic-package' | 'international-packages' | 'visa' | 'marketing'
   | 'pipeline' | 'hr' | 'settings';
-type NavItem = { view: string; label: string; roles: string[]; href: string; icon: ReactNode; dept: Dept };
+// dept '*' = a "universal" item that appears inside EVERY department's nav
+// (e.g. Fill a Query). It is shown in whatever department is currently
+// selected, but it never adds a department to the dropdown on its own.
+type NavItem = { view: string; label: string; roles: string[]; href: string; icon: ReactNode; dept: Dept | '*' };
 type NavSection = { label: string; items: NavItem[]; roles: string[] };
 
 // Department labels for the top-of-sidebar dropdown. Owner sees all
@@ -77,6 +80,19 @@ const SECTIONS: NavSection[] = [
     ],
   },
 
+  // ─── FORMS (universal) ────────────────────────────────────────
+  // Fill a Query is dept '*' — it shows inside EVERY department's nav so an
+  // exec in any desk can file a courier/petrol/etc query without switching
+  // departments. The form's own fillRoles narrow who actually sees each
+  // form on the page; responses land on the accounts Queries desk.
+  {
+    label: 'Forms',
+    roles: [...ROLE_SLUGS],
+    items: [
+      { view: 'query-fill', label: 'Fill a Query', href: '/portal/query-fill', roles: [...ROLE_SLUGS], dept: '*', icon: <svg viewBox="0 0 24 24"><path d="M4 4h16v12H8l-4 4z"/><path d="M9 9h6M9 12h4"/></svg> },
+    ],
+  },
+
   // ─── FOLLOWUP department (collections / accounts work) ────────
   {
     label: 'Operations',
@@ -113,6 +129,10 @@ const SECTIONS: NavSection[] = [
       { view: 'vendor-pay',    label: 'Vendor Payments',    href: '/portal/vendor-payments', roles: ['owner','admin','cm-accounts','accounts'],        dept: 'accounts', icon: <svg viewBox="0 0 24 24"><path d="M3 7h18v10H3z"/><path d="M3 11h18"/><circle cx="8" cy="14" r="1"/></svg> },
       { view: 'reco',          label: 'Reconciliation',     href: '/portal/reco',         roles: ['owner','admin','cm-accounts','accounts'],          dept: 'accounts', icon: <svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/><path d="M14 4l6 0 0 6"/></svg> },
       { view: 'billing',       label: 'Billing',            href: '/portal/billing',      roles: ['owner','admin','cm-accounts','accounts'],          dept: 'accounts', icon: <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M9 13h6M9 17h4"/></svg> },
+      // Queries desk — responses from the Fill-a-Query forms. Accounts read,
+      // classify the related account, then push (dry-run) or reject. Owner
+      // also edits the form registry here.
+      { view: 'queries',       label: 'Queries',            href: '/portal/queries',      roles: ['owner','admin','cm-accounts','accounts'],          dept: 'accounts', icon: <svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="M8 9h8M8 13h5"/></svg> },
     ],
   },
   {
@@ -316,6 +336,11 @@ export function Sidebar({ user }: { user: CurrentUser }) {
   // Detect the department of the currently-open page so the dropdown
   // can auto-sync when the user clicks a link in another department.
   const currentItem = visibleItems.find(i => isActiveHref(router.pathname, i.href));
+  // A '*' (universal) item like Fill a Query has no real home department, so
+  // it must NEVER drive the dropdown — landing on it keeps whatever
+  // department was already selected.
+  const currentDept: Dept | null =
+    currentItem && currentItem.dept !== '*' ? currentItem.dept : null;
 
   const [selectedDept, setSelectedDept] = useState<Dept>(() => {
     // Start on the CURRENT page's department from the very first render
@@ -326,14 +351,14 @@ export function Sidebar({ user }: { user: CurrentUser }) {
     // short list before the department synced to the real, taller one —
     // making the sidebar jump back to the top on every navigation. The
     // effects below still handle the no-current-item case via DEPT_KEY.
-    return currentItem?.dept || availableDepts[0]?.slug || 'followup';
+    return currentDept || availableDepts[0]?.slug || 'followup';
   });
 
   // Initial sync: prefer the current page's department, fall back to
   // the saved sessionStorage value, fall back to the first available.
   useEffect(() => {
     let target: Dept | null = null;
-    if (currentItem) target = currentItem.dept;
+    if (currentDept) target = currentDept;
     if (!target) {
       try {
         const saved = sessionStorage.getItem(DEPT_KEY) as Dept | null;
@@ -349,11 +374,11 @@ export function Sidebar({ user }: { user: CurrentUser }) {
   // navigation. So clicking a Settings link from inside Followup
   // flips the dropdown to Settings automatically.
   useEffect(() => {
-    if (currentItem && currentItem.dept !== selectedDept) {
-      setSelectedDept(currentItem.dept);
+    if (currentDept && currentDept !== selectedDept) {
+      setSelectedDept(currentDept);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentItem?.dept]);
+  }, [currentDept]);
 
   // Persist the selected department.
   useEffect(() => {
@@ -362,7 +387,7 @@ export function Sidebar({ user }: { user: CurrentUser }) {
 
   // Final visible sections: filter by selected department + canSee.
   const sections = SECTIONS
-    .map(s => ({ ...s, items: s.items.filter(i => i.dept === selectedDept && canSee(i, user)) }))
+    .map(s => ({ ...s, items: s.items.filter(i => (i.dept === selectedDept || i.dept === '*') && canSee(i, user)) }))
     .filter(s => s.items.length > 0);
 
   // Restore the saved scroll position — but only ONCE, and only after the

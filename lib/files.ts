@@ -16,6 +16,9 @@ import { query, queryOne, newId } from '@/lib/pg';
 // record type is a one-line change here (e.g. 'query' once item 5 lands).
 export const FILE_ENTITY_VIEW: Record<string, string> = {
   'vendor-payment': 'vendor-pay',
+  // Gated on the broad fill view: whoever can fill a query can attach/see its
+  // files, and the accounts desk (which also holds 'query-fill') sees them all.
+  'query': 'query-fill',
 };
 
 export function viewForEntity(entityType: string): string | null {

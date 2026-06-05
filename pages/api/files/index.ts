@@ -27,6 +27,10 @@ async function parentExists(entityType: string, entityId: string): Promise<boole
     const row = await queryOne<any>(`SELECT id FROM "VendorPayment" WHERE id = $1`, [entityId]);
     return !!row;
   }
+  if (entityType === 'query') {
+    const row = await queryOne<any>(`SELECT id FROM "Query" WHERE id = $1`, [entityId]);
+    return !!row;
+  }
   return false;
 }
 
