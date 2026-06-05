@@ -69,6 +69,9 @@ const SECTIONS: NavSection[] = [
       // must NEVER surface to any exec. Eye icon to distinguish from chat.
       { view: 'messages-admin', label: 'Message Oversight', href: '/portal/messages-admin', roles: ['owner'], dept: 'personal', icon: <svg viewBox="0 0 24 24"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg> },
       { view: 'tasks',     label: 'Tasks',      href: '/portal/tasks',   roles: [...ROLE_SLUGS], dept: 'personal', icon: <svg viewBox="0 0 24 24"><path d="M9 11l3 3 8-8M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg> },
+      // Self-service leave — universal like Tasks; the page self-scopes to the
+      // caller's own employee record, so it's safe for every logged-in user.
+      { view: 'leave',     label: 'My Leave',   href: '/portal/leave',   roles: [...ROLE_SLUGS], dept: 'personal', icon: <svg viewBox="0 0 24 24"><path d="M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z"/><path d="M9 16h6"/></svg> },
       { view: 'profile',   label: 'My Profile', href: '/portal/profile', roles: ['owner','admin','cm-accounts','accounts','insights'], dept: 'personal', icon: <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg> },
     ],
   },

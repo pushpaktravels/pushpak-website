@@ -7,6 +7,7 @@
 import { newId } from './pg';
 import type { BiometricRow } from './attendance-parser';
 import { classifyDay, type ClassifyInput, type LeaveKind } from './attendance-classify';
+import { leaveEffect, type LeaveKindSS } from './leave';
 
 type Q = (sql: string, params?: any[]) => Promise<any[]>;
 
@@ -78,13 +79,23 @@ export async function ensureEmployees(
   return { byCode, created };
 }
 
-// Look up the per-date context the classifier needs: is it a holiday,
-// and which employees have an approved leave / on-duty covering the date.
-export async function loadDayContext(q: Q, iso: string): Promise<{
+export type DayContext = {
   isHoliday: boolean;
   leaveByEmp: Map<string, LeaveKind>;
   onDutyEmps: Set<string>;
-}> {
+  // Self-service partial-day declarations (lib/leave): half-day / late / early.
+  // These don't make the classifier think the whole day is a leave — they are
+  // applied AFTER classification to flag the day informed (and, for half days,
+  // set the half-day status). Keyed employeeId → leave kind.
+  declByEmp: Map<string, LeaveKindSS>;
+};
+
+// Look up the per-date context the classifier needs: is it a holiday, who has
+// time off covering the date, and how. Two leave vocabularies coexist:
+//   • legacy/classifier kinds (PAID_FROM_BALANCE / SPECIAL_PAID / LWP / ON_DUTY)
+//   • self-service kinds (FULL_DAY / HALF_DAY / LATE_ARRIVAL / EARLY_OUT)
+// FULL_DAY is normalised to a full-day leave; the partial kinds go to declByEmp.
+export async function loadDayContext(q: Q, iso: string): Promise<DayContext> {
   const hol = await q(`SELECT 1 FROM "Holiday" WHERE date = $1 LIMIT 1`, [iso]);
   const leaves = await q(
     `SELECT "employeeId", kind FROM "LeaveRequest"
@@ -93,11 +104,123 @@ export async function loadDayContext(q: Q, iso: string): Promise<{
   );
   const leaveByEmp = new Map<string, LeaveKind>();
   const onDutyEmps = new Set<string>();
+  const declByEmp = new Map<string, LeaveKindSS>();
   for (const l of leaves as any[]) {
-    if (l.kind === 'ON_DUTY') onDutyEmps.add(l.employeeId);
-    else if (l.kind) leaveByEmp.set(l.employeeId, l.kind as LeaveKind);
+    const kind = l.kind as string | null;
+    if (!kind) continue;
+    if (kind === 'ON_DUTY') onDutyEmps.add(l.employeeId);
+    else if (kind === 'FULL_DAY') leaveByEmp.set(l.employeeId, 'PAID_FROM_BALANCE');
+    else if (kind === 'HALF_DAY' || kind === 'LATE_ARRIVAL' || kind === 'EARLY_OUT') {
+      declByEmp.set(l.employeeId, kind as LeaveKindSS);
+    } else {
+      // legacy classifier vocabulary (PAID_FROM_BALANCE / SPECIAL_PAID / LWP)
+      leaveByEmp.set(l.employeeId, kind as LeaveKind);
+    }
   }
-  return { isHoliday: hol.length > 0, leaveByEmp, onDutyEmps };
+  return { isHoliday: hol.length > 0, leaveByEmp, onDutyEmps, declByEmp };
+}
+
+// Reflect a freshly-declared leave onto any DailyAttendance rows that ALREADY
+// exist in the range (e.g. today's punches were uploaded before the person
+// declared). Human overrides (overridden = TRUE) are never touched. Future
+// dates with no row yet are handled at upload time via loadDayContext.
+// Returns how many day-rows were updated. Pass kind === null to REVERT a
+// cancelled declaration (clear the informed flag; re-classification on the
+// next upload restores the true biometric status).
+export async function applyDeclarationToDays(
+  q: Q,
+  employeeId: string,
+  fromIso: string,
+  toIso: string,
+  kind: LeaveKindSS | null,
+): Promise<number> {
+  if (kind === null) {
+    const r = await q(
+      `UPDATE "DailyAttendance" SET "isInformed" = FALSE, "updatedAt" = NOW()
+        WHERE "employeeId" = $1 AND date >= $2 AND date <= $3 AND overridden = FALSE`,
+      [employeeId, fromIso, toIso],
+    );
+    return (r as any).length ?? 0;
+  }
+  const eff = leaveEffect(kind);
+  // Build the SET list from the effect so the three kinds stay in lock-step
+  // with lib/leave. Partial kinds only flip the informed flag.
+  if (eff.status && eff.deductionDays !== null) {
+    const r = await q(
+      `UPDATE "DailyAttendance" SET
+         status = $4, "isInformed" = TRUE, "deductionDays" = $5,
+         source = 'leave', "updatedAt" = NOW()
+       WHERE "employeeId" = $1 AND date >= $2 AND date <= $3 AND overridden = FALSE`,
+      [employeeId, fromIso, toIso, eff.status, eff.deductionDays],
+    );
+    return (r as any).length ?? 0;
+  }
+  const r = await q(
+    `UPDATE "DailyAttendance" SET "isInformed" = TRUE, "updatedAt" = NOW()
+      WHERE "employeeId" = $1 AND date >= $2 AND date <= $3 AND overridden = FALSE`,
+    [employeeId, fromIso, toIso],
+  );
+  return (r as any).length ?? 0;
+}
+
+// Re-run the engine over the existing (non-overridden) attendance rows in a
+// date range — used after a leave is CANCELLED so a day that was forced to
+// LEAVE / HALF_DAY snaps back to its true biometric status. Reads each day's
+// fresh context (the cancelled leave is already gone), re-classifies from the
+// punches on file, and re-applies any OTHER still-standing declaration.
+export async function reclassifyDays(
+  q: Q,
+  emp: EmployeeRow,
+  fromIso: string,
+  toIso: string,
+): Promise<number> {
+  const rows = (await q(
+    `SELECT id, date, "scheduledIn", "scheduledOut", "actualIn", "actualOut", "workDurMin"
+       FROM "DailyAttendance"
+      WHERE "employeeId" = $1 AND date >= $2 AND date <= $3 AND overridden = FALSE`,
+    [emp.id, fromIso, toIso],
+  )) as any[];
+
+  let n = 0;
+  const ctxCache = new Map<string, DayContext>();
+  for (const r of rows) {
+    const iso = typeof r.date === 'string' ? r.date.slice(0, 10) : isoString(r.date);
+    let ctx = ctxCache.get(iso);
+    if (!ctx) { ctx = await loadDayContext(q, iso); ctxCache.set(iso, ctx); }
+
+    const ci: ClassifyInput = {
+      scheduledIn: r.scheduledIn ?? emp.shiftIn,
+      scheduledOut: r.scheduledOut ?? emp.shiftOut,
+      actualIn: r.actualIn,
+      actualOut: r.actualOut,
+      isWeeklyOff: weekdayOf(iso) === emp.weeklyOffDay,
+      isHoliday: ctx.isHoliday,
+      leaveKind: ctx.leaveByEmp.get(emp.id) ?? null,
+      onDuty: ctx.onDutyEmps.has(emp.id),
+    };
+    const c = classifyDay(ci);
+
+    let status = c.status, informed = false, deduction = c.rawDeductionDays, remark = c.remark;
+    const decl = ctx.declByEmp.get(emp.id);
+    if (decl) {
+      const eff = leaveEffect(decl);
+      informed = eff.informed;
+      if (eff.status) status = eff.status;
+      if (eff.deductionDays !== null) deduction = eff.deductionDays;
+    }
+    await q(
+      `UPDATE "DailyAttendance" SET status=$1, "isInformed"=$2, "deductionDays"=$3,
+              remark=$4, "lateByMin"=$5, "earlyGoingMin"=$6, source='biometric', "updatedAt"=NOW()
+        WHERE id=$7`,
+      [status, informed, deduction, remark, c.lateByMin, c.earlyGoingMin, r.id],
+    );
+    n++;
+  }
+  return n;
+}
+
+function isoString(d: Date): string {
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
 }
 
 // Upsert one DailyAttendance row, merging punches with any existing
@@ -109,7 +232,7 @@ export async function upsertAttendance(
   emp: EmployeeRow,
   iso: string,
   row: BiometricRow,
-  ctx: { isHoliday: boolean; leaveByEmp: Map<string, LeaveKind>; onDutyEmps: Set<string> },
+  ctx: DayContext,
 ): Promise<void> {
   const existing = (
     await q(
@@ -135,6 +258,23 @@ export async function upsertAttendance(
   };
   const c = classifyDay(ci);
 
+  // Apply any self-service partial-day declaration (half / late / early) on
+  // top of the engine's call: the day becomes informed (green) and, for a
+  // half day, takes the half-day status + deduction. Full-day leaves were
+  // already folded into ci.leaveKind above, so they don't appear here.
+  const decl = ctx.declByEmp.get(emp.id);
+  let finalStatus = c.status;
+  let finalInformed = false;
+  let finalDeduction = c.rawDeductionDays;
+  let finalRemark = c.remark;
+  if (decl) {
+    const eff = leaveEffect(decl);
+    finalInformed = eff.informed;
+    if (eff.status) finalStatus = eff.status;
+    if (eff.deductionDays !== null) finalDeduction = eff.deductionDays;
+    finalRemark = c.remark ? `${c.remark} · declared ${decl}` : `declared ${decl}`;
+  }
+
   if (existing) {
     if (existing.overridden) {
       // keep human status; just refresh punch data + machine refs
@@ -152,12 +292,12 @@ export async function upsertAttendance(
            "machineCode" = $1, "scheduledIn" = $2, "scheduledOut" = $3,
            "actualIn" = $4, "actualOut" = $5,
            "lateByMin" = $6, "earlyGoingMin" = $7, "workDurMin" = $8,
-           status = $9, "isInformed" = FALSE, "deductionDays" = $10,
-           remark = $11, source = 'biometric', "updatedAt" = NOW()
-         WHERE id = $12`,
+           status = $9, "isInformed" = $10, "deductionDays" = $11,
+           remark = $12, source = 'biometric', "updatedAt" = NOW()
+         WHERE id = $13`,
         [row.machineCode, ci.scheduledIn, ci.scheduledOut, actualIn, actualOut,
-         c.lateByMin, c.earlyGoingMin, row.workDurMin, c.status, c.rawDeductionDays,
-         c.remark, existing.id],
+         c.lateByMin, c.earlyGoingMin, row.workDurMin, finalStatus, finalInformed, finalDeduction,
+         finalRemark, existing.id],
       );
     }
   } else {
@@ -166,10 +306,10 @@ export async function upsertAttendance(
         (id, "employeeId", "machineCode", date, "scheduledIn", "scheduledOut",
          "actualIn", "actualOut", "lateByMin", "earlyGoingMin", "workDurMin",
          status, "isInformed", "deductionDays", remark, source, "createdAt", "updatedAt")
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,FALSE,$13,$14,'biometric',NOW(),NOW())`,
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'biometric',NOW(),NOW())`,
       [newId('att'), emp.id, row.machineCode, iso, ci.scheduledIn, ci.scheduledOut,
        actualIn, actualOut, c.lateByMin, c.earlyGoingMin, row.workDurMin,
-       c.status, c.rawDeductionDays, c.remark],
+       finalStatus, finalInformed, finalDeduction, finalRemark],
     );
   }
 }

@@ -111,24 +111,62 @@ function AttendanceInner() {
           No attendance recorded for {date}. Upload that day's biometric export above.
         </div>
       ) : (
-        <div style={{ overflowX: 'auto', borderRadius: 12, border: '1px solid rgba(15,40,85,0.10)' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-            <thead>
-              <tr style={{ background: 'rgba(15,40,85,0.04)', textAlign: 'left' }}>
-                {['Name', 'Dept', 'Scheduled', 'In', 'Out', 'Late', 'Status', 'Informed', 'Ded.', 'Remark', ''].map(h => (
-                  <th key={h} style={th}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map(r => <AttendanceRow key={r.id} row={r} onSaved={() => load(date)} onError={setError} />)}
-            </tbody>
-          </table>
-        </div>
+        <>
+          <SameDayHeading date={date} rows={rows} />
+          <div style={{ overflowX: 'auto', borderRadius: 12, border: '1px solid rgba(15,40,85,0.10)' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+              <thead>
+                <tr style={{ background: 'rgba(15,40,85,0.04)', textAlign: 'left' }}>
+                  {['Name', 'Dept', 'Scheduled', 'In', 'Out', 'Late', 'Status', 'Informed', 'Ded.', 'Remark', 'Override'].map(h => (
+                    <th key={h} style={th}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map(r => <AttendanceRow key={r.id} row={r} onSaved={() => load(date)} onError={setError} />)}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
     </div>
   );
 }
+
+// The biometric machine reports IN on the day's own export, but the OUT for a
+// day is only finalised in the NEXT morning's export. So a freshly-uploaded day
+// shows IN punches with OUT still "pending" until tomorrow's file lands. This
+// banner makes that "yesterday-OUT / today-IN" pairing explicit.
+function prevIso(iso: string): string {
+  const [y, m, d] = iso.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d - 1));
+  return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}-${String(dt.getUTCDate()).padStart(2, '0')}`;
+}
+function SameDayHeading({ date, rows }: { date: string; rows: Row[] }) {
+  const pendingOut = rows.filter(r => r.actualIn && !r.actualOut).length;
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
+      padding: '10px 14px', marginBottom: 12, borderRadius: 10,
+      background: 'rgba(26,63,126,0.05)', border: '1px solid rgba(26,63,126,0.14)',
+    }}>
+      <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--navy-deep, #1A3F7E)' }}>
+        Same-day report · {date}
+      </span>
+      <span style={{ fontSize: 12.5, color: 'var(--ink-soft)' }}>
+        IN punches are from {date}; OUT carries over from each person's previous shift.
+        {pendingOut > 0
+          ? ` ${pendingOut} row(s) still show OUT as “pending” — they finalise when you upload the ${date} evening / next-morning export.`
+          : ' All OUT punches finalised.'}
+      </span>
+      <span style={{ marginLeft: 'auto', fontSize: 11.5, color: 'var(--ink-soft)' }}>
+        Prev day: {prevIso(date)}
+      </span>
+    </div>
+  );
+}
+
+const PENALISED = new Set(['ABSENT', 'HALF_DAY', 'LATE']);
 
 function rowBg(r: Row): string {
   if (r.isInformed) return 'rgba(46,108,84,0.08)';        // green — informed absence
@@ -143,19 +181,39 @@ function AttendanceRow({ row, onSaved, onError }: { row: Row; onSaved: () => voi
   const [status, setStatus] = useState(row.status);
   const [informed, setInformed] = useState(row.isInformed);
   const [remark, setRemark] = useState(row.remark || '');
+  const [actualIn, setActualIn] = useState(hhmm(row.actualIn));
+  const [actualOut, setActualOut] = useState(hhmm(row.actualOut));
+  const [ded, setDed] = useState(String(Number(row.deductionDays) || 0));
   const [saving, setSaving] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  async function patch(body: Record<string, any>): Promise<boolean> {
+    const r = await fetch('/api/attendance/daily', {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: row.id, ...body }),
+    });
+    const d = await r.json();
+    if (!d.ok) { onError(d.error || 'Save failed'); return false; }
+    return true;
+  }
 
   async function save() {
     setSaving(true);
-    try {
-      const r = await fetch('/api/attendance/daily', {
-        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: row.id, status, isInformed: informed, remark }),
-      });
-      const d = await r.json();
-      if (!d.ok) { onError(d.error || 'Save failed'); setSaving(false); return; }
-      setEditing(false); onSaved();
-    } catch (e: any) { onError(e.message); setSaving(false); }
+    const dedNum = Math.max(0, Math.min(1, Number(ded) || 0));
+    const ok = await patch({
+      status, isInformed: informed, remark,
+      actualIn, actualOut, deductionDays: dedNum,
+    });
+    setSaving(false);
+    if (ok) { setEditing(false); onSaved(); }
+  }
+
+  // One-click: excuse a penalised day as fully-paid leave.
+  async function excuse() {
+    setBusy(true);
+    const ok = await patch({ excusePaid: true });
+    setBusy(false);
+    if (ok) onSaved();
   }
 
   if (editing) {
@@ -164,8 +222,12 @@ function AttendanceRow({ row, onSaved, onError }: { row: Row; onSaved: () => voi
         <td style={td}><b>{row.name}</b></td>
         <td style={td}>{row.department || '—'}</td>
         <td style={td}>{sched(row)}</td>
-        <td style={td}>{row.actualIn || '—'}</td>
-        <td style={td}>{row.actualOut || '—'}</td>
+        <td style={td}>
+          <input style={{ ...inp, width: 84 }} type="time" value={actualIn} onChange={e => setActualIn(e.target.value)} />
+        </td>
+        <td style={td}>
+          <input style={{ ...inp, width: 84 }} type="time" value={actualOut} onChange={e => setActualOut(e.target.value)} />
+        </td>
         <td style={td}>{lateLabel(row)}</td>
         <td style={td}>
           <select style={{ ...inp, width: 120 }} value={status} onChange={e => setStatus(e.target.value)}>
@@ -175,7 +237,9 @@ function AttendanceRow({ row, onSaved, onError }: { row: Row; onSaved: () => voi
         <td style={td}>
           <input type="checkbox" checked={informed} onChange={e => setInformed(e.target.checked)} />
         </td>
-        <td style={td}>—</td>
+        <td style={td}>
+          <input style={{ ...inp, width: 60 }} type="number" min={0} max={1} step={0.5} value={ded} onChange={e => setDed(e.target.value)} />
+        </td>
         <td style={td}>
           <input style={{ ...inp, width: 150 }} value={remark} placeholder="reason…" onChange={e => setRemark(e.target.value)} />
         </td>
@@ -202,7 +266,15 @@ function AttendanceRow({ row, onSaved, onError }: { row: Row; onSaved: () => voi
       <td style={td}>{row.isInformed ? <span style={pill('sage')}>informed</span> : '—'}</td>
       <td style={{ ...td, fontVariantNumeric: 'tabular-nums' }}>{Number(row.deductionDays) > 0 ? Number(row.deductionDays) : '—'}</td>
       <td style={{ ...td, color: 'var(--ink-soft)', maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.remark || '—'}</td>
-      <td style={td}><button onClick={() => setEditing(true)} style={btnLink}>Edit</button></td>
+      <td style={{ ...td, whiteSpace: 'nowrap' }}>
+        <button onClick={() => setEditing(true)} style={btnLink}>Override</button>
+        {PENALISED.has(row.status) && !row.isInformed && (
+          <button onClick={excuse} disabled={busy} title="Excuse as paid leave (no deduction)"
+            style={{ ...btnLink, color: '#2E6C54', marginLeft: 10 }}>
+            {busy ? '…' : 'Excuse (paid)'}
+          </button>
+        )}
+      </td>
     </tr>
   );
 }
@@ -281,6 +353,12 @@ function FilePick({ label, file, inputRef, onPick }: {
 // ─── small bits ──────────────────────────────────────────────
 function sched(r: Row): string {
   return r.scheduledIn && r.scheduledOut ? `${r.scheduledIn}–${r.scheduledOut}` : '—';
+}
+// "HH:mm:ss" / "HH:mm" → "HH:mm" for <input type="time">; '' when absent.
+function hhmm(t: string | null): string {
+  if (!t) return '';
+  const m = /^(\d{1,2}):(\d{2})/.exec(t);
+  return m ? `${m[1].padStart(2, '0')}:${m[2]}` : '';
 }
 function lateLabel(r: Row): string {
   if (!r.lateByMin || r.lateByMin <= 0) return '—';
