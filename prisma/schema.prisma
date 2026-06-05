@@ -103,6 +103,7 @@ model Account {
   status        String    @default("Pending")
   onHold        String? // "" / "Candidate" / "Active"
   branch        String?
+  finbookClientId String? // remembered FinBook ledger code ("CCA…") for this party — fills the FinBook search automatically once confirmed
   lastTouched   DateTime?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
