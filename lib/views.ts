@@ -104,6 +104,14 @@ export const VIEWS: ViewRow[] = [
   // accounts/ops screen: raise a request → manager approves → pay → bill.
   // Portal-only; no FinBook. Approving is manager-gated server-side.
   { key: 'vendor-pay',          label: 'Vendor Payments',     roles: ['owner', 'admin', 'cm-accounts', 'accounts'] },
+  // Reconciliation status board — replaces the bank-reco + airline-reco
+  // Excels. Mark each account reconciled for its period; managers add the
+  // accounts. Portal-only; no FinBook.
+  { key: 'reco',                label: 'Reconciliation',      roles: ['owner', 'admin', 'cm-accounts', 'accounts'] },
+  // Auto-billing console (Phase 3) — turn a ticketed booking into a FinBook
+  // sales bill. Dry-run by default (simulated, nothing posted); the FinBook
+  // chokepoint enforces the mode. Accounts + oversight.
+  { key: 'billing',             label: 'Billing',             roles: ['owner', 'admin', 'cm-accounts', 'accounts'] },
   // HR module.
   { key: 'attendance',          label: 'Attendance',          roles: ['owner', 'admin', 'hr'] },
   { key: 'employees',           label: 'Employees',           roles: ['owner', 'admin', 'hr'] },

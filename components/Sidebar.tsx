@@ -96,6 +96,8 @@ const SECTIONS: NavSection[] = [
       { view: 'finbook',       label: 'FinBook',            href: '/portal/finbook',      roles: ['owner','admin','cm-accounts','accounts'],           dept: 'followup', icon: <svg viewBox="0 0 24 24"><path d="M4 4h16v16H4z"/><path d="M8 8h8M8 12h8M8 16h5"/></svg> },
       { view: 'card-log',      label: 'Card Bookings',      href: '/portal/card-bookings', roles: ['owner','admin','cm-accounts','accounts'],          dept: 'followup', icon: <svg viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/><path d="M6 15h4"/></svg> },
       { view: 'vendor-pay',    label: 'Vendor Payments',    href: '/portal/vendor-payments', roles: ['owner','admin','cm-accounts','accounts'],        dept: 'followup', icon: <svg viewBox="0 0 24 24"><path d="M3 7h18v10H3z"/><path d="M3 11h18"/><circle cx="8" cy="14" r="1"/></svg> },
+      { view: 'reco',          label: 'Reconciliation',     href: '/portal/reco',         roles: ['owner','admin','cm-accounts','accounts'],          dept: 'followup', icon: <svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/><path d="M14 4l6 0 0 6"/></svg> },
+      { view: 'billing',       label: 'Billing',            href: '/portal/billing',      roles: ['owner','admin','cm-accounts','accounts'],          dept: 'followup', icon: <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M9 13h6M9 17h4"/></svg> },
     ],
   },
   {
