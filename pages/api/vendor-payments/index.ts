@@ -67,8 +67,11 @@ async function list(req: NextApiRequest, res: NextApiResponse, user: any) {
   const whereSql = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
   try {
     const rows = await query<any>(
-      `SELECT * FROM "VendorPayment" ${whereSql}
-         ORDER BY ("status"='requested') DESC, "dueDate" ASC NULLS LAST, "createdAt" DESC LIMIT 1000`,
+      `SELECT vp.*,
+              (SELECT COUNT(*)::int FROM "PortalFile" pf
+                 WHERE pf."entityType" = 'vendor-payment' AND pf."entityId" = vp.id) AS "fileCount"
+         FROM "VendorPayment" vp ${whereSql}
+         ORDER BY (vp."status"='requested') DESC, vp."dueDate" ASC NULLS LAST, vp."createdAt" DESC LIMIT 1000`,
       params
     );
     // Headline counts for the approver: how many waiting + total to pay.

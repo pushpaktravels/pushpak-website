@@ -9,7 +9,7 @@
 // The approve / reject / pay buttons only appear for manager roles; the API
 // enforces the same state machine server-side, so the UI is convenience only.
 // ============================================================
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import { AppShell } from '../../components/AppShell';
 import { useConfirm } from '../../components/ConfirmProvider';
 import { fmtINR, fmtDate } from '../../lib/fmt';
@@ -21,7 +21,9 @@ type Payment = {
   status: string; requestedByName: string | null; reviewedByName: string | null; reviewNote: string | null;
   paymentMode: string | null; paymentRef: string | null; paidByName: string | null; paidAt: string | null;
   billedByName: string | null; notes: string | null; createdAt: string;
+  fileCount?: number;
 };
+type FileMeta = { id: string; kind: string | null; fileName: string; mimeType: string; size: number; uploadedByName: string | null; createdAt: string };
 type Summary = { pending: number; pending_amount: number | string; approved_amount: number | string };
 
 const SCOPES = [
@@ -42,7 +44,16 @@ export default function VendorPaymentsPage() {
   const [me, setMe] = useState<{ role: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const confirm = useConfirm();
+
+  function toggleFiles(id: string) {
+    setExpanded(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
 
   const isApprover = me ? APPROVER_ROLES.has(me.role) : false;
 
@@ -162,12 +173,13 @@ export default function VendorPaymentsPage() {
             <thead>
               <tr style={{ background: 'var(--bg-2, #f6f8fb)', borderBottom: '1px solid var(--line, #e7eaf0)' }}>
                 <Th>Vendor / Bill</Th><Th align="right">Amount</Th><Th>Purpose</Th><Th>Due</Th>
-                <Th>Raised by</Th><Th>Status</Th><Th align="right">Actions</Th>
+                <Th>Raised by</Th><Th>Files</Th><Th>Status</Th><Th align="right">Actions</Th>
               </tr>
             </thead>
             <tbody>
               {rows.map(p => (
-                <tr key={p.id} style={{ borderBottom: '1px solid var(--line, #e7eaf0)', opacity: p.status === 'rejected' ? 0.6 : 1 }}>
+                <Fragment key={p.id}>
+                <tr style={{ borderBottom: expanded.has(p.id) ? 'none' : '1px solid var(--line, #e7eaf0)', opacity: p.status === 'rejected' ? 0.6 : 1 }}>
                   <Td>
                     <div style={{ color: 'var(--navy-deep)', fontWeight: 600 }}>{p.vendorName}</div>
                     {p.billNo && <div style={{ fontSize: 10.5, color: 'var(--t-3)' }}>Bill {p.billNo}{p.billDate ? ` · ${fmtDate(p.billDate)}` : ''}</div>}
@@ -176,6 +188,12 @@ export default function VendorPaymentsPage() {
                   <Td><span style={{ fontSize: 12.5, color: 'var(--t-2)' }}>{p.purpose || '—'}</span></Td>
                   <Td><span style={{ fontSize: 12.5, color: 'var(--t-2)' }}>{p.dueDate ? fmtDate(p.dueDate) : '—'}</span></Td>
                   <Td><span style={{ fontSize: 12, color: 'var(--t-2)' }}>{p.requestedByName || '—'}</span></Td>
+                  <Td>
+                    <button onClick={() => toggleFiles(p.id)} style={fileChip(!!p.fileCount)}>
+                      <span style={{ fontSize: 12 }}>📎</span>
+                      {p.fileCount ? p.fileCount : 'add'}
+                    </button>
+                  </Td>
                   <Td>
                     <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', color: VENDOR_STATUS_COLOR[p.status] || 'var(--t-2)' }}>{VENDOR_STATUS_LABEL[p.status] || p.status}</span>
                     {p.status === 'paid' && p.paymentMode && <div style={{ fontSize: 10, color: 'var(--t-3)' }}>{p.paymentMode}{p.paymentRef ? ` · ${p.paymentRef}` : ''}</div>}
@@ -192,6 +210,14 @@ export default function VendorPaymentsPage() {
                     </div>
                   </Td>
                 </tr>
+                {expanded.has(p.id) && (
+                  <tr style={{ borderBottom: '1px solid var(--line, #e7eaf0)' }}>
+                    <td colSpan={8} style={{ padding: '0 14px 14px', background: 'var(--bg-2, #f6f8fb)' }}>
+                      <RowFiles paymentId={p.id} onChange={load} onError={setError} />
+                    </td>
+                  </tr>
+                )}
+                </Fragment>
               ))}
             </tbody>
           </table>
@@ -208,6 +234,7 @@ function AddForm({ onSaved, onError }: { onSaved: () => void; onError: (m: strin
     billDate: '', dueDate: '', notes: '',
   });
   const [saving, setSaving] = useState(false);
+  const [bills, setBills] = useState<File[]>([]);
   const set = (k: string, v: string) => setF(p => ({ ...p, [k]: v }));
 
   async function submit(e: React.FormEvent) {
@@ -225,6 +252,8 @@ function AddForm({ onSaved, onError }: { onSaved: () => void; onError: (m: strin
         }),
       }).then(x => x.json());
       if (!res?.ok) throw new Error(res?.error || 'Save failed');
+      const id = res?.data?.payment?.id;
+      if (id && bills.length) await uploadFiles(id, bills, 'bill', onError);
       onSaved();
     } catch (e: any) { onError(e.message); } finally { setSaving(false); }
   }
@@ -240,11 +269,108 @@ function AddForm({ onSaved, onError }: { onSaved: () => void; onError: (m: strin
         <Field label="Purpose"><input value={f.purpose} onChange={e => set('purpose', e.target.value)} placeholder="What is this payment for" style={inputStyle} /></Field>
         <Field label="Notes"><input value={f.notes} onChange={e => set('notes', e.target.value)} placeholder="Anything to flag for the approver" style={inputStyle} /></Field>
       </div>
+      <div style={{ marginTop: 12 }}>
+        <Field label="Bill / invoice — attach if paid by someone else">
+          <input
+            type="file" multiple
+            accept=".pdf,.jpg,.jpeg,.png,.webp,.gif,.heic,.xlsx,.xls,.csv,.doc,.docx"
+            onChange={e => setBills(Array.from(e.target.files || []))}
+            style={{ ...inputStyle, padding: '7px 9px' }}
+          />
+        </Field>
+        {bills.length > 0 && (
+          <div style={{ marginTop: 6, fontSize: 11.5, color: 'var(--t-2)' }}>
+            {bills.length} file{bills.length === 1 ? '' : 's'} ready to attach — uploaded when you raise the request.
+          </div>
+        )}
+      </div>
       <div style={{ marginTop: 14, display: 'flex', gap: 10 }}>
         <button type="submit" disabled={saving} style={addBtn}>{saving ? 'SAVING…' : 'RAISE REQUEST'}</button>
       </div>
     </form>
   );
+}
+
+// ─── Attachments (bills + receipts) ───────────────────────────
+// Files live in our own Postgres (PortalFile), reachable only through the
+// authenticated /api/files route gated to the Vendor Payments view — so
+// accounts open them in the portal, no external storage to manage.
+async function uploadFiles(entityId: string, files: File[], kind: string, onError: (m: string) => void) {
+  for (const file of files) {
+    const fd = new FormData();
+    fd.append('entityType', 'vendor-payment');
+    fd.append('entityId', entityId);
+    fd.append('kind', kind);
+    fd.append('file', file);
+    const res = await fetch('/api/files', { method: 'POST', body: fd }).then(x => x.json()).catch(() => null);
+    if (!res?.ok) onError(res?.error || `Failed to upload ${file.name}`);
+  }
+}
+
+function RowFiles({ paymentId, onChange, onError }: { paymentId: string; onChange: () => void; onError: (m: string) => void }) {
+  const [files, setFiles] = useState<FileMeta[] | null>(null);
+  const [busy, setBusy] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  function load() {
+    fetch(`/api/files?entityType=vendor-payment&entityId=${encodeURIComponent(paymentId)}`)
+      .then(r => r.json())
+      .then(r => { if (r?.ok) setFiles(r.files); else onError(r?.error || 'Failed to load files'); })
+      .catch(e => onError(e.message));
+  }
+  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [paymentId]);
+
+  async function onPick(e: React.ChangeEvent<HTMLInputElement>) {
+    const picked = Array.from(e.target.files || []);
+    if (!picked.length) return;
+    setBusy(true);
+    await uploadFiles(paymentId, picked, 'receipt', onError);
+    setBusy(false);
+    if (inputRef.current) inputRef.current.value = '';
+    load();
+    onChange();
+  }
+
+  async function del(id: string) {
+    setBusy(true);
+    const res = await fetch(`/api/files/${encodeURIComponent(id)}`, { method: 'DELETE' }).then(x => x.json()).catch(() => null);
+    setBusy(false);
+    if (!res?.ok) { onError(res?.error || 'Delete failed'); return; }
+    load();
+    onChange();
+  }
+
+  return (
+    <div style={{ padding: '10px 0' }}>
+      <div style={{ fontSize: 10.5, letterSpacing: '.1em', textTransform: 'uppercase', color: 'var(--t-3)', fontWeight: 700, marginBottom: 8 }}>Bills &amp; receipts</div>
+      {files === null && <div style={{ fontSize: 12, color: 'var(--t-3)' }}>Loading…</div>}
+      {files && files.length === 0 && <div style={{ fontSize: 12, color: 'var(--t-3)', marginBottom: 8 }}>No files attached yet.</div>}
+      {files && files.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 8 }}>
+          {files.map(file => (
+            <div key={file.id} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12.5 }}>
+              <span style={{ fontSize: 13 }}>📎</span>
+              <a href={`/api/files/${encodeURIComponent(file.id)}`} target="_blank" rel="noreferrer" style={{ color: 'var(--navy)', fontWeight: 600, textDecoration: 'none' }}>{file.fileName}</a>
+              {file.kind && <span style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '.06em', color: 'var(--t-3)', border: '1px solid var(--line-2, #d0d6e0)', borderRadius: 5, padding: '1px 6px' }}>{file.kind}</span>}
+              <span style={{ color: 'var(--t-3)', fontSize: 11 }}>{fmtBytes(file.size)}{file.uploadedByName ? ` · ${file.uploadedByName}` : ''}</span>
+              <button onClick={() => del(file.id)} disabled={busy} style={linkBtn}>Remove</button>
+            </div>
+          ))}
+        </div>
+      )}
+      <div>
+        <input ref={inputRef} type="file" multiple accept=".pdf,.jpg,.jpeg,.png,.webp,.gif,.heic,.xlsx,.xls,.csv,.doc,.docx" onChange={onPick} disabled={busy} style={{ fontSize: 12 }} />
+        {busy && <span style={{ marginLeft: 8, fontSize: 11.5, color: 'var(--t-3)' }}>Uploading…</span>}
+      </div>
+    </div>
+  );
+}
+
+function fmtBytes(n: number): string {
+  if (!n) return '0 B';
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 // ─── bits ─────────────────────────────────────────────────────
@@ -273,6 +399,8 @@ function RowBtn({ children, onClick }: { children: React.ReactNode; onClick: () 
 }
 
 const chip = (active: boolean): React.CSSProperties => ({ padding: '6px 14px', borderRadius: 8, border: active ? '1px solid var(--navy-deep, #1A3F7E)' : '1px solid rgba(15,40,85,0.2)', background: active ? 'var(--navy-deep, #1A3F7E)' : '#fff', color: active ? '#fff' : 'var(--ink)', fontSize: 13, fontWeight: 600, cursor: 'pointer' });
+const fileChip = (has: boolean): React.CSSProperties => ({ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 9px', borderRadius: 7, border: '1px solid var(--line-2, #d0d6e0)', background: has ? 'rgba(26,111,168,.08)' : '#fff', color: has ? 'var(--navy)' : 'var(--t-3)', fontSize: 11.5, fontWeight: 700, cursor: 'pointer' });
+const linkBtn: React.CSSProperties = { marginLeft: 'auto', background: 'none', border: 'none', color: 'var(--rust)', fontSize: 11, fontWeight: 700, cursor: 'pointer', padding: 0 };
 const inputStyle: React.CSSProperties = { width: '100%', fontSize: 14, padding: '9px 11px', border: '1px solid var(--line, #e7eaf0)', borderRadius: 8, outline: 'none', color: 'var(--navy-deep)', fontFamily: 'inherit', background: '#fff' };
 const addBtn: React.CSSProperties = { background: 'var(--navy-deep)', color: '#fff', border: 'none', borderRadius: 10, padding: '11px 20px', fontSize: 12, fontWeight: 700, letterSpacing: '.12em', cursor: 'pointer', whiteSpace: 'nowrap', boxShadow: '0 4px 14px rgba(15,40,85,.18)' };
 const statCard: React.CSSProperties = { background: '#fff', border: '1px solid var(--line, #e7eaf0)', borderRadius: 12, padding: '12px 14px' };
