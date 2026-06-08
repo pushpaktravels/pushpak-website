@@ -101,14 +101,40 @@ export default function QueryFillPage() {
 
 function FillForm({ form, onCancel, onSaved, onError }: { form: Form; onCancel: () => void; onSaved: () => void; onError: (m: string) => void }) {
   const [values, setValues] = useState<Record<string, any>>({});
+  // Per-field uploads (one File per 'file' field, keyed by field.key) plus the
+  // catch-all "Attachments" slot at the bottom.
+  const [fieldFiles, setFieldFiles] = useState<Record<string, File | null>>({});
   const [files, setFiles] = useState<File[]>([]);
   const [saving, setSaving] = useState(false);
   const set = (k: string, v: any) => setValues(p => ({ ...p, [k]: v }));
+  const setFile = (k: string, f: File | null) => setFieldFiles(p => ({ ...p, [k]: f }));
+
+  // A 'file' field captures bytes (uploaded after create with kind=field.key),
+  // not a text value — split it out from the text fields.
+  const textFields = form.fields.filter(f => f.type !== 'file');
+  const fileFields = form.fields.filter(f => f.type === 'file');
+
+  // Files attach to whatever the submission became: a 'query' for a normal
+  // form, or a 'vendor-payment' for a routed form (the create response tells
+  // us which). The server's ownership fallback lets the submitter upload even
+  // without the owning view's edit right.
+  async function uploadOne(entityType: string, id: string, file: File, kind: string) {
+    const fd = new FormData();
+    fd.append('entityType', entityType);
+    fd.append('entityId', id);
+    fd.append('kind', kind);
+    fd.append('file', file);
+    const up = await fetch('/api/files', { method: 'POST', body: fd }).then(x => x.json()).catch(() => null);
+    if (!up?.ok) onError(up?.error || `Failed to upload ${file.name}`);
+  }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    for (const f of form.fields) {
+    for (const f of textFields) {
       if (f.required && !String(values[f.key] ?? '').trim()) { onError(`${f.label} is required.`); return; }
+    }
+    for (const f of fileFields) {
+      if (f.required && !fieldFiles[f.key]) { onError(`${f.label} is required.`); return; }
     }
     setSaving(true);
     try {
@@ -117,17 +143,15 @@ function FillForm({ form, onCancel, onSaved, onError }: { form: Form; onCancel: 
         body: JSON.stringify({ formKey: form.key, values }),
       }).then(x => x.json());
       if (!res?.ok) throw new Error(res?.error || 'Submit failed');
-      const id = res?.data?.query?.id;
-      if (id && files.length) {
-        for (const file of files) {
-          const fd = new FormData();
-          fd.append('entityType', 'query');
-          fd.append('entityId', id);
-          fd.append('kind', 'attachment');
-          fd.append('file', file);
-          const up = await fetch('/api/files', { method: 'POST', body: fd }).then(x => x.json()).catch(() => null);
-          if (!up?.ok) onError(up?.error || `Failed to upload ${file.name}`);
+      // Normal forms return {query}, routed forms return {entityType,entityId}.
+      const entityType: string = res?.data?.entityType || 'query';
+      const id: string | undefined = res?.data?.entityId || res?.data?.query?.id;
+      if (id) {
+        for (const f of fileFields) {
+          const file = fieldFiles[f.key];
+          if (file) await uploadOne(entityType, id, file, f.key);
         }
+        for (const file of files) await uploadOne(entityType, id, file, 'attachment');
       }
       onSaved();
     } catch (e: any) { onError(e.message); } finally { setSaving(false); }
@@ -139,17 +163,26 @@ function FillForm({ form, onCancel, onSaved, onError }: { form: Form; onCancel: 
       {form.description && <div style={{ fontSize: 12.5, color: 'var(--t-2)', marginBottom: 16 }}>{form.description}</div>}
 
       <div style={{ display: 'grid', gap: 14 }}>
-        {form.fields.map(f => (
+        {textFields.map(f => (
           <label key={f.key} style={{ display: 'block' }}>
             <span style={fieldLbl}>{f.label}{f.required ? ' *' : ''}</span>
             <FieldInput field={f} value={values[f.key] ?? ''} onChange={(v) => set(f.key, v)} />
             {f.help && <span style={{ display: 'block', fontSize: 11, color: 'var(--t-3)', marginTop: 4 }}>{f.help}</span>}
           </label>
         ))}
+        {fileFields.map(f => (
+          <label key={f.key} style={{ display: 'block' }}>
+            <span style={fieldLbl}>{f.label}{f.required ? ' *' : ''}</span>
+            <input type="file" accept=".pdf,.jpg,.jpeg,.png,.webp,.gif,.heic,.xlsx,.xls,.csv,.doc,.docx"
+              onChange={e => setFile(f.key, e.target.files?.[0] || null)} style={{ ...inputStyle, padding: '7px 9px' }} />
+            {fieldFiles[f.key] && <span style={{ display: 'block', fontSize: 11.5, color: 'var(--t-2)', marginTop: 4 }}>{fieldFiles[f.key]!.name}</span>}
+            {f.help && <span style={{ display: 'block', fontSize: 11, color: 'var(--t-3)', marginTop: 4 }}>{f.help}</span>}
+          </label>
+        ))}
       </div>
 
       <div style={{ marginTop: 16 }}>
-        <span style={fieldLbl}>Attachments (optional)</span>
+        <span style={fieldLbl}>Other attachments (optional)</span>
         <input type="file" multiple accept=".pdf,.jpg,.jpeg,.png,.webp,.gif,.heic,.xlsx,.xls,.csv,.doc,.docx"
           onChange={e => setFiles(Array.from(e.target.files || []))} style={{ ...inputStyle, padding: '7px 9px' }} />
         {files.length > 0 && <div style={{ marginTop: 6, fontSize: 11.5, color: 'var(--t-2)' }}>{files.length} file{files.length === 1 ? '' : 's'} ready to attach.</div>}

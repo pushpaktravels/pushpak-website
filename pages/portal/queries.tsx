@@ -196,6 +196,7 @@ function QueryDetail({ q, form, onChange, onError }: { q: Query; form?: FormDef;
         {files && files.map(f => (
           <div key={f.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, marginTop: 4 }}>
             <span>📎</span>
+            {f.kind && f.kind !== 'attachment' && <span style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.04em', color: 'var(--t-3)', background: 'var(--line, #eef1f6)', padding: '1px 6px', borderRadius: 5 }}>{fieldLabel(f.kind)}</span>}
             <a href={`/api/files/${encodeURIComponent(f.id)}`} target="_blank" rel="noreferrer" style={{ color: 'var(--navy)', fontWeight: 600, textDecoration: 'none' }}>{f.fileName}</a>
             <span style={{ color: 'var(--t-3)', fontSize: 11 }}>{f.uploadedByName || ''}</span>
           </div>
@@ -342,16 +343,26 @@ function FormEditor({ form, onChange, onToggle, onError }: { form: any; onChange
             <div style={detailHd}>Fields</div>
             <div style={{ display: 'grid', gap: 6 }}>
               {fields.map((f, i) => (
-                <div key={i} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                  <input value={f.key} onChange={e => setField(i, { key: e.target.value })} placeholder="key" style={{ ...inputStyle, maxWidth: 120 }} />
-                  <input value={f.label} onChange={e => setField(i, { label: e.target.value })} placeholder="label" style={{ ...inputStyle, flex: 1 }} />
-                  <select value={f.type} onChange={e => setField(i, { type: e.target.value as any })} style={{ ...inputStyle, maxWidth: 130 }}>
-                    {['text', 'textarea', 'number', 'money', 'date', 'select', 'account'].map(t => <option key={t} value={t}>{t}</option>)}
-                  </select>
-                  <label style={{ fontSize: 11, color: 'var(--t-2)', display: 'flex', alignItems: 'center', gap: 3 }}>
-                    <input type="checkbox" checked={!!f.required} onChange={e => setField(i, { required: e.target.checked })} />req
-                  </label>
-                  <button onClick={() => removeField(i)} style={rowBtn}>✕</button>
+                <div key={i} style={{ display: 'grid', gap: 4 }}>
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                    <input value={f.key} onChange={e => setField(i, { key: e.target.value })} placeholder="key" style={{ ...inputStyle, maxWidth: 120 }} />
+                    <input value={f.label} onChange={e => setField(i, { label: e.target.value })} placeholder="label" style={{ ...inputStyle, flex: 1 }} />
+                    <select value={f.type} onChange={e => setField(i, { type: e.target.value as any })} style={{ ...inputStyle, maxWidth: 130 }}>
+                      {['text', 'textarea', 'number', 'money', 'date', 'select', 'account', 'file'].map(t => <option key={t} value={t}>{t}</option>)}
+                    </select>
+                    <label style={{ fontSize: 11, color: 'var(--t-2)', display: 'flex', alignItems: 'center', gap: 3 }}>
+                      <input type="checkbox" checked={!!f.required} onChange={e => setField(i, { required: e.target.checked })} />req
+                    </label>
+                    <button onClick={() => removeField(i)} style={rowBtn}>✕</button>
+                  </div>
+                  {f.type === 'select' && (
+                    <input
+                      value={(f.options || []).join(', ')}
+                      onChange={e => setField(i, { options: e.target.value.split(',').map((s: string) => s.trim()).filter(Boolean) })}
+                      placeholder="dropdown options, comma-separated"
+                      style={{ ...inputStyle, fontSize: 12, marginLeft: 126 }}
+                    />
+                  )}
                 </div>
               ))}
             </div>

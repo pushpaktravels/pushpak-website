@@ -8,7 +8,9 @@
 //     account, and an appended remark log. Attachments live in PortalFile
 //     (entityType='query'); pushing is DRY-RUN (marks Accepted only).
 //
-// Seeds the safe starter forms (Courier, Petrol) from lib/queries.ts.
+// Seeds the starter forms (Courier, Petrol, Billing for OTP, Vendor Payments)
+// from lib/queries.ts — re-running only inserts keys that don't exist yet, so
+// it never clobbers owner edits. The OTP form stores no OTP/card number.
 // Portal only — never touches FinBook. Idempotent, safe to re-run.
 //   npx tsx scripts/add-queries.ts
 // ============================================================
@@ -32,10 +34,16 @@ const pool = new Pool({ connectionString: process.env.DIRECT_URL || process.env.
       "defaultClassify" TEXT,
       active            BOOLEAN NOT NULL DEFAULT TRUE,
       "sortOrder"       INTEGER NOT NULL DEFAULT 0,
+      "routeTo"         TEXT,
       "createdAt"       TIMESTAMP(3) NOT NULL DEFAULT NOW(),
       "updatedAt"       TIMESTAMP(3) NOT NULL DEFAULT NOW()
     )
   `);
+  // routeTo — added after the table first shipped, so backfill for existing
+  // installs. NULL = a generic Query on the accounts desk; 'vendor-payment'
+  // routes the submission into the Vendor Payments module instead (the
+  // consolidation: one fill place, one tracking place).
+  await pool.query(`ALTER TABLE "QueryForm" ADD COLUMN IF NOT EXISTS "routeTo" TEXT`);
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS "Query" (
@@ -67,15 +75,24 @@ const pool = new Pool({ connectionString: process.env.DIRECT_URL || process.env.
     const f = SEED_FORMS[i];
     const r = await pool.query(
       `INSERT INTO "QueryForm"
-         (id, key, title, description, fields, "fillRoles", "fillDepts", "viewRoles", "defaultClassify", "sortOrder")
-       VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9,$10)
+         (id, key, title, description, fields, "fillRoles", "fillDepts", "viewRoles", "defaultClassify", "sortOrder", "routeTo")
+       VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9,$10,$11)
        ON CONFLICT (key) DO NOTHING`,
       [
         `qform_${f.key}`, f.key, f.title, f.description || null, JSON.stringify(f.fields),
-        f.fillRoles, f.fillDepts, f.viewRoles, f.defaultClassify, i,
+        f.fillRoles, f.fillDepts, f.viewRoles, f.defaultClassify, i, f.routeTo || null,
       ],
     );
     seeded += r.rowCount || 0;
+    // routeTo is a system routing flag, not an owner-editable field, so keep it
+    // in sync even on already-seeded rows (ON CONFLICT skips the INSERT). This
+    // never clobbers owner edits to title/fields/permissions.
+    if (f.routeTo) {
+      await pool.query(
+        `UPDATE "QueryForm" SET "routeTo" = $1 WHERE key = $2 AND "routeTo" IS DISTINCT FROM $1`,
+        [f.routeTo, f.key],
+      );
+    }
   }
 
   console.log(`✓ QueryForm + Query ready (seeded ${seeded} new form${seeded === 1 ? '' : 's'})`);

@@ -15,6 +15,7 @@ import { query, queryOne, newId } from '@/lib/pg';
 import { requireAuth } from '@/lib/auth';
 import { requireView, requireViewEdit } from '@/lib/views';
 import { audit } from '@/lib/audit';
+import { formInDept, vendorPaymentFromValues } from '@/lib/queries';
 
 const CreateBody = z.object({
   formKey: z.string().min(1).max(40),
@@ -95,10 +96,48 @@ async function create(req: NextApiRequest, res: NextApiResponse, user: any) {
   const form = await queryOne<any>(`SELECT * FROM "QueryForm" WHERE key = $1`, [b.formKey]);
   if (!form) return res.status(404).json({ ok: false, error: 'Form not found' });
   if (!form.active) return res.status(400).json({ ok: false, error: 'This form is not active' });
-  // Enforce the form's fill permission server-side (UI only hides it).
-  const fillRoles: string[] = form.fillRoles || [];
-  if (user.role !== 'owner' && fillRoles.length > 0 && !fillRoles.includes(user.role)) {
-    return res.status(403).json({ ok: false, error: 'You cannot fill this form' });
+  // Enforce the form's fill permission server-side (UI only hides it): both
+  // the role gate and the department gate, mirroring canFill on the registry.
+  if (user.role !== 'owner' && user.role !== 'admin') {
+    const fillRoles: string[] = form.fillRoles || [];
+    if (fillRoles.length > 0 && !fillRoles.includes(user.role)) {
+      return res.status(403).json({ ok: false, error: 'You cannot fill this form' });
+    }
+    if (!formInDept(user.role, form.fillDepts)) {
+      return res.status(403).json({ ok: false, error: 'You cannot fill this form' });
+    }
+  }
+
+  // ─── Routed forms (the consolidation) ───────────────────────
+  // A form with routeTo='vendor-payment' is filled here in Fill a Query but
+  // does NOT become a generic Query on the accounts desk — it becomes a
+  // VendorPayment so the one Vendor Payments module is the single tracking
+  // place. The employee never needs 'vendor-pay' access to file it: we insert
+  // server-side and the file upload uses an ownership fallback (/api/files).
+  // The returned entityType/entityId tell query-fill where to attach files.
+  if (form.routeTo === 'vendor-payment') {
+    const m = vendorPaymentFromValues(b.values || {});
+    const billDate = m.billDate ? new Date(m.billDate) : null;
+    const vpId = newId('vpay');
+    try {
+      await query(
+        `INSERT INTO "VendorPayment"
+           (id, "vendorName", "billNo", amount, purpose, "billDate", "dueDate", department,
+            status, "requestedByExecId", "requestedByName", notes, "createdBy", "createdAt", "updatedAt")
+         VALUES ($1,$2,$3,$4,$5,$6,NULL,$7,'requested',$8,$9,$10,$11,NOW(),NOW())`,
+        [
+          vpId, m.vendorName, m.billNo, m.amount, m.purpose,
+          billDate && !isNaN(billDate.getTime()) ? billDate.toISOString() : null,
+          b.department || user.role || null, user.execId, user.name, m.notes, user.execId,
+        ],
+      );
+      audit(req, user, 'VENDOR_PAYMENT_REQUEST', m.vendorName, { id: vpId, amount: m.amount, via: 'query-fill' });
+      const row = await queryOne<any>(`SELECT * FROM "VendorPayment" WHERE id = $1`, [vpId]);
+      return res.json({ ok: true, data: { routedTo: 'vendor-payment', entityType: 'vendor-payment', entityId: vpId, payment: row } });
+    } catch (err: any) {
+      console.error('[api/queries] routed vendor-payment create error', err);
+      return res.status(500).json({ ok: false, error: err.message || 'Submit failed' });
+    }
   }
 
   const id = newId('query');
@@ -111,7 +150,7 @@ async function create(req: NextApiRequest, res: NextApiResponse, user: any) {
     );
     audit(req, user, 'QUERY_SUBMIT', form.key, { id });
     const row = await queryOne<any>(`SELECT * FROM "Query" WHERE id = $1`, [id]);
-    return res.json({ ok: true, data: { query: row } });
+    return res.json({ ok: true, data: { query: row, entityType: 'query', entityId: id } });
   } catch (err: any) {
     console.error('[api/queries] create error', err);
     return res.status(500).json({ ok: false, error: err.message || 'Submit failed' });

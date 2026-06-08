@@ -14,7 +14,7 @@ import { requireView } from '@/lib/views';
 const FieldSchema = z.object({
   key: z.string().min(1).max(40),
   label: z.string().min(1).max(120),
-  type: z.enum(['text', 'textarea', 'number', 'money', 'date', 'select', 'account']),
+  type: z.enum(['text', 'textarea', 'number', 'money', 'date', 'select', 'account', 'file']),
   required: z.boolean().optional(),
   options: z.array(z.string().max(80)).max(40).optional(),
   help: z.string().max(200).optional(),

@@ -20,18 +20,25 @@ import { storeFile, listFiles, viewForEntity } from '@/lib/files';
 
 export const config = { api: { bodyParser: false } };
 
-// Confirm the parent record exists before hanging a file off it, so we never
-// store orphan attachments. One table per known entityType.
-async function parentExists(entityType: string, entityId: string): Promise<boolean> {
+// Confirm the parent record exists before hanging a file off it (so we never
+// store orphan attachments) AND learn who created it. The creator's execId
+// powers the ownership fallback below: a user who raised a record may attach
+// its files even without the owning view's edit right. This is what lets an
+// employee file the Vendor Payments form via Fill a Query and upload the
+// required Bill, despite not holding 'vendor-pay' access — they only ever
+// touch records they themselves created.
+type ParentInfo = { exists: boolean; ownerExecId: string | null };
+
+async function parentInfo(entityType: string, entityId: string): Promise<ParentInfo> {
   if (entityType === 'vendor-payment') {
-    const row = await queryOne<any>(`SELECT id FROM "VendorPayment" WHERE id = $1`, [entityId]);
-    return !!row;
+    const row = await queryOne<any>(`SELECT "requestedByExecId" AS owner FROM "VendorPayment" WHERE id = $1`, [entityId]);
+    return { exists: !!row, ownerExecId: row ? row.owner : null };
   }
   if (entityType === 'query') {
-    const row = await queryOne<any>(`SELECT id FROM "Query" WHERE id = $1`, [entityId]);
-    return !!row;
+    const row = await queryOne<any>(`SELECT "submittedByExecId" AS owner FROM "Query" WHERE id = $1`, [entityId]);
+    return { exists: !!row, ownerExecId: row ? row.owner : null };
   }
-  return false;
+  return { exists: false, ownerExecId: null };
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
@@ -49,7 +56,13 @@ async function list(req: NextApiRequest, res: NextApiResponse, user: any) {
 
   const view = viewForEntity(entityType);
   if (!view) return res.status(400).json({ ok: false, error: 'Unknown entity type' });
-  if (!requireView(user, res, view)) return;
+
+  // The record's creator may always see its files; otherwise read needs the
+  // owning view. (Existence is checked implicitly — a missing record has no
+  // owner and no files.)
+  const info = await parentInfo(entityType, entityId);
+  const owns = !!info.ownerExecId && info.ownerExecId === user.execId;
+  if (!owns && !requireView(user, res, view)) return;
 
   const files = await listFiles(entityType, entityId);
   return res.json({ ok: true, files });
@@ -73,11 +86,15 @@ async function upload(req: NextApiRequest, res: NextApiResponse, user: any) {
 
   const view = viewForEntity(entityType);
   if (!view) return res.status(400).json({ ok: false, error: 'Unknown entity type' });
-  if (!requireViewEdit(user, res, view)) return;
 
-  if (!(await parentExists(entityType, entityId))) {
+  // Gate AND existence in one read: the creator may attach files to their own
+  // record (ownership fallback); everyone else needs edit on the owning view.
+  const info = await parentInfo(entityType, entityId);
+  if (!info.exists) {
     return res.status(404).json({ ok: false, error: 'Parent record not found' });
   }
+  const owns = !!info.ownerExecId && info.ownerExecId === user.execId;
+  if (!owns && !requireViewEdit(user, res, view)) return;
 
   const meta = await storeFile({
     entityType, entityId, kind,
