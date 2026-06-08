@@ -71,6 +71,17 @@ async function listForms(req: NextApiRequest, res: NextApiResponse, user: any) {
     return res.json({ ok: true, forms: rows });
   }
 
+  if (mode === 'responses') {
+    // The accounts Queries desk — the list of forms whose responses land here,
+    // used to populate the "which form" filter dropdown. Excludes routed forms
+    // (routeTo set): a Vendor Payments submission becomes a VendorPayment, not
+    // a Query, so it has no response on this desk and must not appear in the
+    // filter. Includes inactive forms so old responses still map to a name.
+    if (!requireView(user, res, 'queries')) return;
+    const rows = await query<any>(`SELECT * FROM "QueryForm" WHERE "routeTo" IS NULL ORDER BY "sortOrder", title`);
+    return res.json({ ok: true, forms: rows });
+  }
+
   // Fill mode: forms the caller may fill. Needs the broad 'query-fill' view.
   if (!requireView(user, res, 'query-fill')) return;
   const rows = await query<any>(`SELECT * FROM "QueryForm" WHERE active = TRUE ORDER BY "sortOrder", title`);

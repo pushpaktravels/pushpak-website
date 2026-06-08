@@ -386,8 +386,20 @@ export function Sidebar({ user }: { user: CurrentUser }) {
   }, [selectedDept]);
 
   // Final visible sections: filter by selected department + canSee.
+  // Universal ('*') items like Fill a Query appear inside every WORKING
+  // department, but are suppressed in the non-operational departments
+  // (Settings governance, Command Center overview) — you don't file a query
+  // from the admin console. Add a slug here to hide universals from it.
+  const HIDE_UNIVERSAL_IN = new Set<Dept>(['settings', 'command']);
   const sections = SECTIONS
-    .map(s => ({ ...s, items: s.items.filter(i => (i.dept === selectedDept || i.dept === '*') && canSee(i, user)) }))
+    .map(s => ({
+      ...s,
+      items: s.items.filter(i => {
+        if (!canSee(i, user)) return false;
+        if (i.dept === '*') return !HIDE_UNIVERSAL_IN.has(selectedDept);
+        return i.dept === selectedDept;
+      }),
+    }))
     .filter(s => s.items.length > 0);
 
   // Restore the saved scroll position — but only ONCE, and only after the

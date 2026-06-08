@@ -62,24 +62,34 @@ function ResponsesTab() {
   const [rows, setRows] = useState<Query[] | null>(null);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [status, setStatus] = useState('');
+  const [formKey, setFormKey] = useState('');
   const [q, setQ] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [formMap, setFormMap] = useState<Record<string, FormDef>>({});
+  const [formList, setFormList] = useState<FormDef[]>([]);
 
   function load() {
     const params = new URLSearchParams();
     if (status) params.set('status', status);
+    if (formKey) params.set('formKey', formKey);
     if (q.trim()) params.set('q', q.trim());
     fetch(`/api/queries?${params.toString()}`)
       .then(r => r.json())
       .then(r => { if (!r?.ok) throw new Error(r?.error || 'Failed to load'); setRows(r.data.queries || []); setSummary(r.data.summary || null); })
       .catch(e => setError(e.message));
   }
-  useEffect(() => { const t = setTimeout(load, 200); return () => clearTimeout(t); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [status, q]);
+  useEffect(() => { const t = setTimeout(load, 200); return () => clearTimeout(t); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [status, formKey, q]);
   useEffect(() => {
-    fetch('/api/queries/forms?mode=fill').then(r => r.json()).then(r => {
-      if (r?.ok) { const m: Record<string, FormDef> = {}; for (const f of r.forms) m[f.key] = f; setFormMap(m); }
+    // Forms whose responses land on this desk (routed forms excluded), for the
+    // field-label map AND the "which form" filter dropdown.
+    fetch('/api/queries/forms?mode=responses').then(r => r.json()).then(r => {
+      if (r?.ok) {
+        const m: Record<string, FormDef> = {};
+        for (const f of r.forms) m[f.key] = f;
+        setFormMap(m);
+        setFormList(r.forms || []);
+      }
     }).catch(() => {});
   }, []);
 
@@ -98,6 +108,10 @@ function ResponsesTab() {
       </div>
 
       <div style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
+        <select value={formKey} onChange={e => setFormKey(e.target.value)} style={{ ...inputStyle, maxWidth: 220 }}>
+          <option value="">All forms</option>
+          {formList.map(f => <option key={f.key} value={f.key}>{f.title}</option>)}
+        </select>
         <select value={status} onChange={e => setStatus(e.target.value)} style={{ ...inputStyle, maxWidth: 180 }}>
           <option value="">All statuses</option>
           {Object.entries(QUERY_STATUS_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
