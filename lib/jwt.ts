@@ -9,8 +9,14 @@ const SECRET = process.env.JWT_SECRET || '';
 if (!SECRET) throw new Error('JWT_SECRET is not set in environment');
 const KEY = new TextEncoder().encode(SECRET);
 
-export const ACCESS_TOKEN_TTL_SECONDS = 15 * 60;       // 15 min
-export const REFRESH_TOKEN_TTL_SECONDS = 7 * 24 * 3600; // 7 days
+// Access token is short-lived but renewed silently by the client (see
+// /api/refresh + AppShell). 60 min gives a wide margin so a missed refresh
+// never kicks an active operator out mid-task. The refresh token is a long,
+// SLIDING window: every refresh pushes its expiry forward, so a user who
+// opens the portal at least once a month is never signed out involuntarily —
+// only an explicit logout or the idle timeout ends the session.
+export const ACCESS_TOKEN_TTL_SECONDS = 60 * 60;        // 60 min
+export const REFRESH_TOKEN_TTL_SECONDS = 30 * 24 * 3600; // 30 days (rolling)
 
 export type AccessClaims = {
   sub: string;       // user id (cuid)

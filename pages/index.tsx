@@ -15,18 +15,27 @@ export default function Home() {
     let done = false;
     const stallTimer = setTimeout(() => { if (!done) setStalled(true); }, 3000);
 
-    fetch('/api/me')
-      .then(r => r.json())
-      .then(r => {
+    async function decide() {
+      try {
+        let r = await fetch('/api/me').then(x => x.json()).catch(() => null);
+        // If only the short-lived access token has expired, a valid refresh
+        // token should land the operator straight back in the portal rather
+        // than at the login screen.
+        if (!r?.ok) {
+          const refreshed = await fetch('/api/refresh', { method: 'POST' })
+            .then(x => x.json()).catch(() => null);
+          if (refreshed?.ok) r = refreshed;
+        }
         done = true;
         clearTimeout(stallTimer);
         router.replace(r?.ok ? '/portal' : '/login');
-      })
-      .catch(() => {
+      } catch {
         done = true;
         clearTimeout(stallTimer);
         router.replace('/login');
-      });
+      }
+    }
+    decide();
 
     return () => clearTimeout(stallTimer);
   }, [router]);

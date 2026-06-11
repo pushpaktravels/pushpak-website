@@ -40,21 +40,58 @@ export function AppShell({
 
   useEffect(() => {
     let cancelled = false;
-    fetch('/api/me')
-      .then(r => r.json())
-      .then(r => {
+    async function loadUser() {
+      try {
+        let r = await fetch('/api/me').then(x => x.json()).catch(() => null);
         if (cancelled) return;
+        // The access token may simply have expired (it is short-lived by
+        // design). Before giving up and bouncing to /login, try a silent
+        // refresh once — that's what stops the "logged out every 15 min"
+        // behaviour. Only a missing/expired REFRESH token signs the user out.
         if (!r?.ok) {
-          sessionStorage.removeItem(USER_CACHE_KEY);
-          router.replace('/login');
-          return;
+          const refreshed = await fetch('/api/refresh', { method: 'POST' })
+            .then(x => x.json()).catch(() => null);
+          if (cancelled) return;
+          if (refreshed?.ok) {
+            r = refreshed; // /api/refresh returns the same user shape as /api/me
+          } else {
+            sessionStorage.removeItem(USER_CACHE_KEY);
+            router.replace('/login');
+            return;
+          }
         }
         setUser(r.user);
         try { sessionStorage.setItem(USER_CACHE_KEY, JSON.stringify(r.user)); } catch {}
-      })
-      .catch(err => { if (!cancelled) setError(err.message || 'Failed to load user'); });
+      } catch (err: any) {
+        if (!cancelled) setError(err.message || 'Failed to load user');
+      }
+    }
+    loadUser();
     return () => { cancelled = true; };
   }, [router]);
+
+  // Keep the session alive. The access token is short-lived; without this it
+  // would quietly expire and the next request would 401 the operator out
+  // mid-task. We silently renew it well before expiry on a timer, and again
+  // whenever the tab regains focus (e.g. after the laptop wakes from sleep).
+  // The user is only ever signed out by an explicit logout or the idle
+  // timeout below — never by the token expiring on its own.
+  useEffect(() => {
+    if (!user) return;
+    const REFRESH_EVERY_MS = 10 * 60 * 1000; // 10 min (access token lives 60)
+    function refresh() {
+      fetch('/api/refresh', { method: 'POST', keepalive: true }).catch(() => {});
+    }
+    const id = setInterval(refresh, REFRESH_EVERY_MS);
+    function onVisible() { if (document.visibilityState === 'visible') refresh(); }
+    window.addEventListener('focus', refresh);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      clearInterval(id);
+      window.removeEventListener('focus', refresh);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [user]);
 
   // Idle auto-logout. Default 30 min — owner can tweak via the
   // SESSION_IDLE_MINUTES Setting. Any mousemove / keydown / click /
@@ -67,7 +104,11 @@ export function AppShell({
   useEffect(() => {
     if (!user) return;
     let timer: any;
-    const IDLE_MS = 30 * 60 * 1000;
+    // Owner-tunable via SESSION_IDLE_MINUTES in /portal/settings (delivered
+    // on the user payload). Falls back to 30 min if absent. Set it high to
+    // effectively disable idle sign-out on trusted single-operator terminals.
+    const idleMinutes = Number(user.sessionIdleMinutes) > 0 ? Number(user.sessionIdleMinutes) : 30;
+    const IDLE_MS = idleMinutes * 60 * 1000;
     function logoutNow() {
       sessionStorage.removeItem(USER_CACHE_KEY);
       fetch('/api/logout', { method: 'POST' }).finally(() => {

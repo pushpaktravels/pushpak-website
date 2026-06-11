@@ -20,6 +20,9 @@ export type CurrentUser = {
   // Used when the user has no per-user viewPerms, so the nav matches the
   // server gate after a role default changes.
   roleViews?: string[] | null;
+  // Owner-tunable idle auto-logout in minutes (from /api/me). The shell's
+  // idle timer reads this; falls back to 30 when absent.
+  sessionIdleMinutes?: number | null;
   mustChangePassword?: boolean;
 };
 

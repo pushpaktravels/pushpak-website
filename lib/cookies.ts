@@ -7,6 +7,7 @@
 //   into making a request (CSRF defense at the cookie layer).
 // ============================================================
 import type { NextApiResponse } from 'next';
+import { ACCESS_TOKEN_TTL_SECONDS, REFRESH_TOKEN_TTL_SECONDS } from './jwt';
 
 const ACCESS_COOKIE = 'pp_access';
 const REFRESH_COOKIE = 'pp_refresh';
@@ -31,8 +32,8 @@ function clearCookie(name: string): string {
 
 export function setAuthCookies(res: NextApiResponse, accessToken: string, refreshToken: string) {
   res.setHeader('Set-Cookie', [
-    buildCookie(ACCESS_COOKIE, accessToken, 15 * 60),
-    buildCookie(REFRESH_COOKIE, refreshToken, 7 * 24 * 3600),
+    buildCookie(ACCESS_COOKIE, accessToken, ACCESS_TOKEN_TTL_SECONDS),
+    buildCookie(REFRESH_COOKIE, refreshToken, REFRESH_TOKEN_TTL_SECONDS),
   ]);
 }
 
