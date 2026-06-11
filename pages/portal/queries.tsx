@@ -362,7 +362,7 @@ function FormEditor({ form, onChange, onToggle, onError }: { form: any; onChange
                     <input value={f.key} onChange={e => setField(i, { key: e.target.value })} placeholder="key" style={{ ...inputStyle, maxWidth: 120 }} />
                     <input value={f.label} onChange={e => setField(i, { label: e.target.value })} placeholder="label" style={{ ...inputStyle, flex: 1 }} />
                     <select value={f.type} onChange={e => setField(i, { type: e.target.value as any })} style={{ ...inputStyle, maxWidth: 130 }}>
-                      {['text', 'textarea', 'number', 'money', 'date', 'select', 'account', 'file'].map(t => <option key={t} value={t}>{t}</option>)}
+                      {['text', 'textarea', 'number', 'money', 'date', 'select', 'account', 'vendor', 'file'].map(t => <option key={t} value={t}>{t}</option>)}
                     </select>
                     <label style={{ fontSize: 11, color: 'var(--t-2)', display: 'flex', alignItems: 'center', gap: 3 }}>
                       <input type="checkbox" checked={!!f.required} onChange={e => setField(i, { required: e.target.checked })} />req

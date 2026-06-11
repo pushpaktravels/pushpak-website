@@ -21,8 +21,11 @@
 // ─── Field definitions (what a form asks for) ─────────────────
 // 'file' = an upload slot rendered on the fill page; the bytes go to
 // PortalFile (entityType='query', kind=field.key), the value itself isn't
-// stored in the query JSON. 'account' is plain text the accounts desk links.
-export type QueryFieldType = 'text' | 'textarea' | 'number' | 'money' | 'date' | 'select' | 'account' | 'file';
+// stored in the query JSON. 'account' renders the client typeahead (searches
+// the Account master, can add-new inline) and 'vendor' the vendor typeahead
+// (searches the Vendor master, can add-new) — both still store a plain name
+// string and accept free text, so the accounts desk links the real row later.
+export type QueryFieldType = 'text' | 'textarea' | 'number' | 'money' | 'date' | 'select' | 'account' | 'vendor' | 'file';
 export type QueryField = {
   key: string;
   label: string;
@@ -190,6 +193,7 @@ export const SEED_FORMS: QueryFormDef[] = [
     description: 'Record a card billing so accounts can book it. Do not enter the OTP or full card number — only pick the card used.',
     fields: [
       { key: 'name', label: 'Name', type: 'text', required: true },
+      { key: 'account', label: 'Account (billed to)', type: 'account', required: true, help: 'Which client/account this booking was made for.' },
       { key: 'amount', label: 'Amount', type: 'money', required: true },
       { key: 'details', label: 'Details', type: 'text', required: true },
       {
@@ -214,17 +218,11 @@ export const SEED_FORMS: QueryFormDef[] = [
     description: 'Submit a vendor bill for payment / booking. Attach the bill (and the payment receipt if it is already paid).',
     routeTo: 'vendor-payment',
     fields: [
-      {
-        key: 'vendor', label: 'Vendor', type: 'select', required: true,
-        options: [
-          'VODAFONE', 'BSNL LANDLINE - 0361 2456789', 'JIO FIBER', 'JIO DIGITAL LIFE',
-          'BSNL INTERNATIONAL - 9401337633', 'AIRTEL', 'VISHAL SIR PHONE', 'XYNOCAST',
-          'BLUEDART', 'SIGNATURE MAINTAINANCE', 'N E HYGIENE', 'APDCL PAT GROUND FLOOR',
-          'APDCL PAT 3RD FLOOR', 'APDCL DAYA SAGAR', 'APDCL SIGNATURE ESTATES',
-          'PAT GROUND FLOOR MAINTAINANCE', 'PAT 3RD FLOOR MAINTAINANCE',
-          'ZILLIOUS SOLUTIONS', 'LOKHNATH PRINTERS', 'Other',
-        ],
-      },
+      // Searchable vendor master (type 'vendor') instead of a hard-coded
+      // dropdown: the picker searches the Vendor table, can add a new supplier
+      // inline, and still accepts a free-typed one-off. The old fixed list now
+      // lives in the Vendor master (seeded from lib/vendors.ts).
+      { key: 'vendor', label: 'Vendor', type: 'vendor', required: true },
       { key: 'invoice', label: 'Invoice no. and details', type: 'text', required: true },
       { key: 'billReceivedOn', label: 'Bill received on', type: 'date', required: true },
       {

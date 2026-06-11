@@ -9,6 +9,8 @@
 import { useEffect, useState } from 'react';
 import { AppShell } from '../../components/AppShell';
 import { useConfirm } from '../../components/ConfirmProvider';
+import { ClientPicker } from '../../components/ClientPicker';
+import { AirlineInput } from '../../components/AirlineInput';
 import { fmtINR, fmtDate } from '../../lib/fmt';
 import { CARDS, CARD_LABEL, CARD_PURPOSES } from '../../lib/cards';
 
@@ -212,8 +214,8 @@ function AddForm({ onSaved, onError }: { onSaved: () => void; onError: (m: strin
         <Field label="Date"><input type="date" value={f.txnDate} onChange={e => set('txnDate', e.target.value)} style={inputStyle} /></Field>
         <Field label="Passenger"><input value={f.passengerName} onChange={e => set('passengerName', e.target.value)} placeholder="Passenger name" style={inputStyle} /></Field>
         <Field label="PNR"><input value={f.pnr} onChange={e => set('pnr', e.target.value)} placeholder="PNR" style={inputStyle} /></Field>
-        <Field label="Airline"><input value={f.airline} onChange={e => set('airline', e.target.value)} placeholder="Airline" style={inputStyle} /></Field>
-        <Field label="Client"><input value={f.clientName} onChange={e => set('clientName', e.target.value)} placeholder="Client / company" style={inputStyle} /></Field>
+        <Field label="Airline"><AirlineInput value={f.airline} onChange={v => set('airline', v)} inputStyle={inputStyle} /></Field>
+        <Field label="Client"><ClientPicker value={f.clientName} onChange={v => set('clientName', v)} inputStyle={inputStyle} placeholder="Search client / account…" /></Field>
         <Field label="Notes"><input value={f.notes} onChange={e => set('notes', e.target.value)} placeholder="Anything to flag" style={inputStyle} /></Field>
       </div>
       <div style={{ marginTop: 14, display: 'flex', gap: 10 }}>

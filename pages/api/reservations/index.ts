@@ -21,6 +21,7 @@ import { syncHoldTask } from '@/lib/reservations';
 const STATUSES = ['Held', 'Ticketed', 'Cancelled'] as const;
 
 const CreateBody = z.object({
+  party:           z.string().max(120).optional().nullable(),   // account billed to (client master, by name)
   passengerName:   z.string().min(1).max(200),
   paxCount:        z.coerce.number().int().min(1).max(50).default(1),
   contact:         z.string().max(100).optional().nullable(),
@@ -130,13 +131,13 @@ async function create(req: NextApiRequest, res: NextApiResponse, user: any) {
   try {
     await query(
       `INSERT INTO "Reservation"
-        (id, pnr, "passengerName", "paxCount", contact, sector, airline,
+        (id, pnr, party, "passengerName", "paxCount", contact, sector, airline,
          "travelDate", "fareAmount", "amountCollected", "costAmount", "refundAmount",
          "holdUntil", vendor, status, notes,
          "agentExecId", "agentName", "createdBy", "createdAt", "updatedAt")
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,NOW(),NOW())`,
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,NOW(),NOW())`,
       [
-        id, b.pnr || null, b.passengerName, b.paxCount, b.contact || null,
+        id, b.pnr || null, b.party || null, b.passengerName, b.paxCount, b.contact || null,
         b.sector, b.airline || null, travelDate ? travelDate.toISOString() : null,
         b.fareAmount, b.amountCollected, b.costAmount, b.refundAmount,
         holdUntil ? holdUntil.toISOString() : null, b.vendor || null, b.status, b.notes || null,

@@ -9,6 +9,8 @@
 // ============================================================
 import { useEffect, useState } from 'react';
 import { AppShell } from '../../components/AppShell';
+import { ClientPicker } from '../../components/ClientPicker';
+import { VendorPicker } from '../../components/VendorPicker';
 import type { QueryField } from '../../lib/queries';
 
 type Form = {
@@ -207,8 +209,11 @@ function FieldInput({ field, value, onChange }: { field: QueryField; value: any;
   if (field.type === 'number') return <input type="number" value={value} onChange={e => onChange(e.target.value)} style={inputStyle} />;
   if (field.type === 'money') return <input type="number" min="0" step="0.01" value={value} onChange={e => onChange(e.target.value)} placeholder="0.00" style={inputStyle} />;
   if (field.type === 'date') return <input type="date" value={value} onChange={e => onChange(e.target.value)} style={inputStyle} />;
-  // text + account → plain text (accounts desk links the real account later)
-  return <input type="text" value={value} onChange={e => onChange(e.target.value)} placeholder={field.type === 'account' ? 'Type the name' : ''} style={inputStyle} />;
+  // 'account' / 'vendor' → searchable master pickers (free-typed names still
+  // pass through, so no one is blocked; accounts links the real row later).
+  if (field.type === 'account') return <ClientPicker value={value} onChange={onChange} inputStyle={inputStyle} placeholder="Search client / account…" />;
+  if (field.type === 'vendor') return <VendorPicker value={value} onChange={onChange} inputStyle={inputStyle} placeholder="Search vendor / supplier…" />;
+  return <input type="text" value={value} onChange={e => onChange(e.target.value)} style={inputStyle} />;
 }
 
 const fieldLbl: React.CSSProperties = { display: 'block', fontSize: 10.5, letterSpacing: '.1em', textTransform: 'uppercase', color: 'var(--t-3)', fontWeight: 700, marginBottom: 5 };

@@ -7,10 +7,14 @@
 // helper used across all three pages.
 // ============================================================
 import { useState } from 'react';
+import { ClientPicker } from './ClientPicker';
+import { VendorPicker } from './VendorPicker';
+import { AirlineInput } from './AirlineInput';
 
 export type Reservation = {
   id: string;
   pnr: string | null;
+  party: string | null;
   passengerName: string;
   paxCount: number;
   contact: string | null;
@@ -80,6 +84,7 @@ export function ReservationModal({
   onSaved: () => void;
 }) {
   const r = reservation;
+  const [party, setParty]                 = useState(r?.party || '');
   const [passengerName, setPassengerName] = useState(r?.passengerName || '');
   const [paxCount, setPaxCount]           = useState(String(r?.paxCount ?? 1));
   const [contact, setContact]             = useState(r?.contact || '');
@@ -108,6 +113,7 @@ export function ReservationModal({
 
     setSaving(true);
     const payload = {
+      party: party.trim() || null,
       passengerName: passengerName.trim(),
       paxCount: Number(paxCount || 1),
       contact: contact.trim() || null,
@@ -165,10 +171,13 @@ export function ReservationModal({
         </header>
 
         <div style={{ padding: 24, overflowY: 'auto', flex: 1 }}>
-          <SectionLabel>Passenger</SectionLabel>
+          <SectionLabel>Client &amp; passenger</SectionLabel>
+          <Field label="Billed to (account)">
+            <ClientPicker value={party} onChange={setParty} inputStyle={inputStyle} placeholder="Search the client / account being billed…" />
+          </Field>
           <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 14 }}>
             <Field label="Passenger name">
-              <input value={passengerName} onChange={e => setPassengerName(e.target.value)} style={inputStyle} autoFocus />
+              <input value={passengerName} onChange={e => setPassengerName(e.target.value)} style={inputStyle} placeholder="who is travelling" />
             </Field>
             <Field label="Pax">
               <input type="number" min={1} value={paxCount} onChange={e => setPaxCount(e.target.value)} style={inputStyle} />
@@ -185,7 +194,7 @@ export function ReservationModal({
               <input value={sector} onChange={e => setSector(e.target.value)} placeholder="e.g. GAU-DEL" style={inputStyle} />
             </Field>
             <Field label="Airline">
-              <input value={airline} onChange={e => setAirline(e.target.value)} placeholder="e.g. IndiGo" style={inputStyle} />
+              <AirlineInput value={airline} onChange={setAirline} inputStyle={inputStyle} />
             </Field>
             <Field label="Travel date">
               <input type="date" value={travelDate} onChange={e => setTravelDate(e.target.value)} style={inputStyle} />
@@ -236,7 +245,7 @@ export function ReservationModal({
             </div>
           </div>
           <Field label="Vendor">
-            <input value={vendor} onChange={e => setVendor(e.target.value)} placeholder="optional" style={inputStyle} />
+            <VendorPicker value={vendor} onChange={setVendor} inputStyle={inputStyle} placeholder="optional — search supplier…" />
           </Field>
 
           <hr style={divStyle} />

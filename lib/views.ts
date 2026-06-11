@@ -104,6 +104,9 @@ export const VIEWS: ViewRow[] = [
   // accounts/ops screen: raise a request → manager approves → pay → bill.
   // Portal-only; no FinBook. Approving is manager-gated server-side.
   { key: 'vendor-pay',          label: 'Vendor Payments',     roles: ['owner', 'admin', 'cm-accounts', 'accounts'] },
+  // Vendor master admin — the one searchable supplier list behind every vendor
+  // picker (bookings, vendor payments). Search/add/edit/deactivate. Portal-only.
+  { key: 'vendors',             label: 'Vendors',             roles: ['owner', 'admin', 'cm-accounts', 'accounts'] },
   // Reconciliation status board — replaces the bank-reco + airline-reco
   // Excels. Mark each account reconciled for its period; managers add the
   // accounts. Portal-only; no FinBook.

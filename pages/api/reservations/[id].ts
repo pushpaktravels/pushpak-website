@@ -19,6 +19,7 @@ import { cancelOpenTasksFor } from '@/lib/tasks';
 const STATUSES = ['Held', 'Ticketed', 'Cancelled'] as const;
 
 const PatchBody = z.object({
+  party:           z.string().max(120).optional().nullable(),
   passengerName:   z.string().min(1).max(200).optional(),
   paxCount:        z.coerce.number().int().min(1).max(50).optional(),
   contact:         z.string().max(100).optional().nullable(),
@@ -38,6 +39,7 @@ const PatchBody = z.object({
 
 // Map a body key → its DB column (so we control exactly what's writable).
 const COLUMN: Record<string, string> = {
+  party:           'party',
   passengerName:   '"passengerName"',
   paxCount:        '"paxCount"',
   contact:         'contact',
@@ -104,7 +106,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         val = null;
       }
     }
-    if (key === 'contact' || key === 'airline' || key === 'vendor' || key === 'pnr' || key === 'notes') {
+    if (key === 'party' || key === 'contact' || key === 'airline' || key === 'vendor' || key === 'pnr' || key === 'notes') {
       val = val || null;
     }
     sets.push(`${col} = $${i++}`);
