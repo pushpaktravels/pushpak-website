@@ -42,6 +42,7 @@ export type PayrollCounts = {
   holiday: number;
   onDuty: number;
   specialPaid: number;
+  overtime: number;     // days worked on a weekly-off / holiday (pay unaffected)
 };
 
 export type PayrollInput = {
@@ -63,6 +64,7 @@ export type PayrollResult = {
   paidHolidays: number;
   weeklyOffs: number;
   onDutyDays: number;
+  overtimeDays: number;       // days worked on a weekly-off / holiday (info only)
   lateCount: number;
   lateDeductionDays: number;
   deductionDays: number;      // total day-fractions lost
@@ -112,6 +114,7 @@ export function computePayroll(inp: PayrollInput): PayrollResult {
     paidHolidays: c.holiday,
     weeklyOffs: c.offDay,
     onDutyDays: c.onDuty,
+    overtimeDays: c.overtime,
     lateCount: c.late,
     lateDeductionDays,
     deductionDays,

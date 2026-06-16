@@ -27,10 +27,10 @@ import {
   DEFAULT_LEAVE_ENTITLEMENT, type PayrollCounts,
 } from '@/lib/payroll';
 
-function tally(rows: { status: string }[]): PayrollCounts {
+function tally(rows: { status: string; isOvertime?: boolean }[]): PayrollCounts {
   const c: PayrollCounts = {
     present: 0, late: 0, halfDay: 0, absent: 0, leave: 0,
-    offDay: 0, holiday: 0, onDuty: 0, specialPaid: 0,
+    offDay: 0, holiday: 0, onDuty: 0, specialPaid: 0, overtime: 0,
   };
   for (const r of rows) {
     switch (r.status) {
@@ -44,6 +44,9 @@ function tally(rows: { status: string }[]): PayrollCounts {
       case 'ON_DUTY': c.onDuty++; break;
       case 'SPECIAL_PAID': c.specialPaid++; break;
     }
+    // Overtime is orthogonal to status: an OFF_DAY/HOLIDAY that was worked
+    // stays counted as off/holiday for pay AND tallies one overtime day.
+    if (r.isOvertime) c.overtime++;
   }
   return c;
 }
@@ -75,7 +78,7 @@ async function gather(month: string): Promise<EmpBundle[]> {
   if (employees.length === 0) return [];
 
   const monthRows = await query<any>(
-    `SELECT "employeeId", status FROM "DailyAttendance"
+    `SELECT "employeeId", status, "isOvertime" FROM "DailyAttendance"
       WHERE date >= $1 AND date < $2`,
     [start, end],
   );
@@ -171,7 +174,8 @@ async function preview(req: NextApiRequest, res: NextApiResponse) {
           halfDays: Number(snap.halfDays), paidLeaves: Number(snap.paidLeaves),
           excessLeaves: 0, lwpDays: Number(snap.lwpDays),
           paidHolidays: Number(snap.paidHolidays), weeklyOffs: Number(snap.weeklyOffs),
-          onDutyDays: Number(snap.onDutyDays), lateCount: snap.lateCount,
+          onDutyDays: Number(snap.onDutyDays), overtimeDays: Number(snap.overtimeDays || 0),
+          lateCount: snap.lateCount,
           lateDeductionDays: Number(snap.lateDeductionDays),
           deductionDays: Number(snap.daysInMonth) - Number(snap.netPayableDays),
           netPayableDays: Number(snap.netPayableDays), perDaySalary: Number(snap.perDaySalary),
@@ -279,22 +283,22 @@ async function finalize(req: NextApiRequest, res: NextApiResponse, user: any) {
            id, "employeeId", month, "daysInMonth", "presentDays", "halfDays",
            "paidLeaves", "lwpDays", "paidHolidays", "weeklyOffs", "onDutyDays",
            "lateCount", "lateDeductionDays", "netPayableDays", "perDaySalary",
-           "grossSalary", "advanceDeduction", "netSalary",
+           "grossSalary", "advanceDeduction", "netSalary", "overtimeDays",
            finalized, "finalizedBy", "finalizedAt", "updatedAt")
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,TRUE,$19,NOW(),NOW())
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,TRUE,$20,NOW(),NOW())
          ON CONFLICT ("employeeId", month) DO UPDATE SET
            "daysInMonth"=$4, "presentDays"=$5, "halfDays"=$6, "paidLeaves"=$7,
            "lwpDays"=$8, "paidHolidays"=$9, "weeklyOffs"=$10, "onDutyDays"=$11,
            "lateCount"=$12, "lateDeductionDays"=$13, "netPayableDays"=$14,
            "perDaySalary"=$15, "grossSalary"=$16, "advanceDeduction"=$17,
-           "netSalary"=$18, finalized=TRUE, "finalizedBy"=$19, "finalizedAt"=NOW(),
-           "updatedAt"=NOW()`,
+           "netSalary"=$18, "overtimeDays"=$19, finalized=TRUE, "finalizedBy"=$20,
+           "finalizedAt"=NOW(), "updatedAt"=NOW()`,
         [
           newId('pay'), b.emp.id, month, result.daysInMonth, result.presentDays,
           result.halfDays, result.paidLeaves, result.lwpDays, result.paidHolidays,
           result.weeklyOffs, result.onDutyDays, result.lateCount, result.lateDeductionDays,
           result.netPayableDays, result.perDaySalary, result.grossSalary,
-          result.advanceDeduction, result.netSalary, user.name,
+          result.advanceDeduction, result.netSalary, result.overtimeDays, user.name,
         ],
       );
 

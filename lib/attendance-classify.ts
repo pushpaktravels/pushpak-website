@@ -55,6 +55,11 @@ export type ClassifyResult = {
   arrivedAfter11: boolean;
   rawDeductionDays: number;     // 0 / 0.5 / 1  (late-tiering applied monthly)
   provisional: boolean;         // true when OUT not yet finalized
+  // OVERTIME (owner rule 2026-06-16): a whole day worked on a weekly-off or
+  // holiday. The day still counts as OFF_DAY/HOLIDAY for PAY (no salary change)
+  // — this flag only marks that they came in, so the month-end Overtime sheet
+  // can tally it. Counted in DAYS, never hours.
+  isOvertime: boolean;
   remark: string | null;
 };
 
@@ -75,6 +80,7 @@ export function classifyDay(input: ClassifyInput): ClassifyResult {
     arrivedAfter11: false,
     rawDeductionDays: 0,
     provisional: false,
+    isOvertime: false,
     remark: null,
   };
 
@@ -89,9 +95,16 @@ export function classifyDay(input: ClassifyInput): ClassifyResult {
     return { ...base, status: 'ABSENT', rawDeductionDays: 1, remark: 'Leave without pay' };
   }
 
-  // 2) Holiday / weekly-off (paid, no punch expected).
-  if (input.isHoliday) return { ...base, status: 'HOLIDAY' };
-  if (input.isWeeklyOff) return { ...base, status: 'OFF_DAY' };
+  // 2) Holiday / weekly-off (paid, no punch expected). If they DID punch,
+  //    the day is still paid as off/holiday but is flagged as overtime so the
+  //    month-end Overtime sheet can count it (owner rule: whole day = 1 OT day).
+  const workedOffDay = !!(input.actualIn || input.actualOut);
+  if (input.isHoliday) {
+    return { ...base, status: 'HOLIDAY', isOvertime: workedOffDay, remark: workedOffDay ? 'Worked on holiday (overtime)' : null };
+  }
+  if (input.isWeeklyOff) {
+    return { ...base, status: 'OFF_DAY', isOvertime: workedOffDay, remark: workedOffDay ? 'Worked on weekly-off (overtime)' : null };
+  }
 
   const inMin = toMin(input.actualIn);
   const outMin = toMin(input.actualOut);

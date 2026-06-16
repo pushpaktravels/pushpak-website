@@ -125,6 +125,7 @@ export const VIEWS: ViewRow[] = [
   { key: 'attendance',          label: 'Attendance',          roles: ['owner', 'admin', 'hr'] },
   { key: 'employees',           label: 'Employees',           roles: ['owner', 'admin', 'hr'] },
   { key: 'payroll',             label: 'Payroll',             roles: ['owner', 'admin', 'hr'] },
+  { key: 'overtime',            label: 'Overtime',            roles: ['owner', 'admin', 'hr'] },
   // Governance / settings.
   { key: 'users-auth',          label: 'Users & Authorities', roles: ['owner'] },
   { key: 'bulk-cm',             label: 'Bulk CM Assignment',  roles: ['owner', 'admin'] },

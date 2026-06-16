@@ -210,9 +210,10 @@ export async function reclassifyDays(
     }
     await q(
       `UPDATE "DailyAttendance" SET status=$1, "isInformed"=$2, "deductionDays"=$3,
-              remark=$4, "lateByMin"=$5, "earlyGoingMin"=$6, source='biometric', "updatedAt"=NOW()
-        WHERE id=$7`,
-      [status, informed, deduction, remark, c.lateByMin, c.earlyGoingMin, r.id],
+              remark=$4, "lateByMin"=$5, "earlyGoingMin"=$6, "isOvertime"=$7,
+              source='biometric', "updatedAt"=NOW()
+        WHERE id=$8`,
+      [status, informed, deduction, remark, c.lateByMin, c.earlyGoingMin, c.isOvertime, r.id],
     );
     n++;
   }
@@ -293,11 +294,11 @@ export async function upsertAttendance(
            "actualIn" = $4, "actualOut" = $5,
            "lateByMin" = $6, "earlyGoingMin" = $7, "workDurMin" = $8,
            status = $9, "isInformed" = $10, "deductionDays" = $11,
-           remark = $12, source = 'biometric', "updatedAt" = NOW()
-         WHERE id = $13`,
+           remark = $12, "isOvertime" = $13, source = 'biometric', "updatedAt" = NOW()
+         WHERE id = $14`,
         [row.machineCode, ci.scheduledIn, ci.scheduledOut, actualIn, actualOut,
          c.lateByMin, c.earlyGoingMin, row.workDurMin, finalStatus, finalInformed, finalDeduction,
-         finalRemark, existing.id],
+         finalRemark, c.isOvertime, existing.id],
       );
     }
   } else {
@@ -305,11 +306,11 @@ export async function upsertAttendance(
       `INSERT INTO "DailyAttendance"
         (id, "employeeId", "machineCode", date, "scheduledIn", "scheduledOut",
          "actualIn", "actualOut", "lateByMin", "earlyGoingMin", "workDurMin",
-         status, "isInformed", "deductionDays", remark, source, "createdAt", "updatedAt")
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'biometric',NOW(),NOW())`,
+         status, "isInformed", "deductionDays", remark, "isOvertime", source, "createdAt", "updatedAt")
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,'biometric',NOW(),NOW())`,
       [newId('att'), emp.id, row.machineCode, iso, ci.scheduledIn, ci.scheduledOut,
        actualIn, actualOut, c.lateByMin, c.earlyGoingMin, row.workDurMin,
-       finalStatus, finalInformed, finalDeduction, finalRemark],
+       finalStatus, finalInformed, finalDeduction, finalRemark, c.isOvertime],
     );
   }
 }
