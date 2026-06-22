@@ -36,6 +36,7 @@ const Base = {
   shiftIn: hhmm,
   shiftOut: hhmm,
   weeklyOffDay: z.number().int().min(0).max(6).optional(),
+  weeklyOffSet: z.boolean().optional(),
   leavesCarryOver: z.boolean().optional(),
   carryOverDays: z.number().min(0).optional(),
   active: z.boolean().optional(),
@@ -52,7 +53,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (req.method === 'GET') {
     const rows = await query(
       `SELECT id, "machineCode", "loginExecId", "hrCode", name, department, designation, mobile, email,
-              dob, "joiningDate", "monthlySalary", "shiftIn", "shiftOut", "weeklyOffDay",
+              dob, "joiningDate", "monthlySalary", "shiftIn", "shiftOut", "weeklyOffDay", "weeklyOffSet",
               "leavesCarryOver", "carryOverDays", active, "createdAt", "updatedAt"
          FROM "Employee"
         ORDER BY active DESC, department NULLS LAST, name`,
@@ -77,12 +78,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     await query(
       `INSERT INTO "Employee"
         (id, "machineCode", "hrCode", name, department, designation, mobile, email,
-         dob, "joiningDate", "monthlySalary", "shiftIn", "shiftOut", "weeklyOffDay",
+         dob, "joiningDate", "monthlySalary", "shiftIn", "shiftOut", "weeklyOffDay", "weeklyOffSet",
          "leavesCarryOver", "carryOverDays", active, "createdAt", "updatedAt")
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,NOW(),NOW())`,
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,NOW(),NOW())`,
       [id, d.machineCode ?? null, d.hrCode, d.name, d.department ?? null, d.designation ?? null,
        d.mobile ?? null, d.email ?? null, d.dob ?? null, d.joiningDate ?? null,
        d.monthlySalary ?? 0, d.shiftIn ?? null, d.shiftOut ?? null, d.weeklyOffDay ?? 0,
+       d.weeklyOffSet ?? true,   // a manual create is an explicit setup → confirmed
        d.leavesCarryOver ?? false, d.carryOverDays ?? 0, d.active ?? true],
     );
     audit(req, user, 'EMPLOYEE_CREATE', id, { hrCode: d.hrCode, name: d.name });
@@ -111,13 +113,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       if (clash) return res.status(409).json({ ok: false, error: `Login ${d.loginExecId} already linked to another employee` });
     }
 
+    // Saving the weekly-off day is itself the confirmation — so any update
+    // that sets the day marks it reviewed (clears the "set day?" flag).
+    const weeklyOffSet = d.weeklyOffDay !== undefined ? true : d.weeklyOffSet;
+
     // Build a COALESCE-style partial update: only provided keys change.
     const fields: Record<string, any> = {
       machineCode: d.machineCode, loginExecId: d.loginExecId, hrCode: d.hrCode, name: d.name, department: d.department,
       designation: d.designation, mobile: d.mobile, email: d.email, dob: d.dob,
       joiningDate: d.joiningDate, monthlySalary: d.monthlySalary, shiftIn: d.shiftIn,
-      shiftOut: d.shiftOut, weeklyOffDay: d.weeklyOffDay, leavesCarryOver: d.leavesCarryOver,
-      carryOverDays: d.carryOverDays, active: d.active,
+      shiftOut: d.shiftOut, weeklyOffDay: d.weeklyOffDay, weeklyOffSet,
+      leavesCarryOver: d.leavesCarryOver, carryOverDays: d.carryOverDays, active: d.active,
     };
     const sets: string[] = [];
     const vals: any[] = [];

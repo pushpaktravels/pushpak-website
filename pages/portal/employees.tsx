@@ -24,6 +24,7 @@ type Employee = {
   shiftIn: string | null;
   shiftOut: string | null;
   weeklyOffDay: number;
+  weeklyOffSet: boolean;
   leavesCarryOver: boolean;
   carryOverDays: string | number;
   active: boolean;
@@ -105,6 +106,7 @@ function EmployeesInner() {
 
   const stubs = employees.filter(e => e.hrCode.startsWith('BIO-'));
   const needsEnrich = employees.filter(e => e.hrCode.startsWith('BIO-') || Number(e.monthlySalary) === 0);
+  const needsWeeklyOff = employees.filter(e => e.active && !e.weeklyOffSet).length;
 
   const q = search.trim().toLowerCase();
   const visible = employees.filter(e => {
@@ -200,12 +202,29 @@ function EmployeesInner() {
     } catch (e: any) { setError(e.message); }
   }
 
+  // Inline weekly-off setter from the table. Saving the day also confirms it
+  // (clears the "set day?" flag) — the server flips weeklyOffSet on any day save.
+  async function setWeeklyOff(emp: Employee, day: number) {
+    setError(null);
+    // optimistic: reflect the pick instantly and clear the review flag
+    setEmployees(list => list.map(x => x.id === emp.id ? { ...x, weeklyOffDay: day, weeklyOffSet: true } : x));
+    try {
+      const r = await fetch('/api/attendance/employees', {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: emp.id, weeklyOffDay: day }),
+      });
+      const d = await r.json();
+      if (!d.ok) { setError(d.error || 'Could not set weekly off'); load(); }
+    } catch (e: any) { setError(e.message); load(); }
+  }
+
   return (
     <div style={{ maxWidth: 1280, margin: '0 auto', padding: '4px 4px 60px' }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 16, marginBottom: 18, flexWrap: 'wrap' }}>
         <h1 style={{ fontSize: 22, fontWeight: 600, color: 'var(--ink)', margin: 0 }}>Employees</h1>
         <div style={{ fontSize: 13, color: 'var(--ink-soft)' }}>
           {employees.length} total · {stubs.length} from biometric · {needsEnrich.length} need details
+          {needsWeeklyOff > 0 && <span style={{ color: 'var(--gold-deep, #9A7634)', fontWeight: 600 }}> · {needsWeeklyOff} need weekly-off</span>}
         </div>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 10 }}>
           <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" style={{ display: 'none' }}
@@ -320,7 +339,21 @@ function EmployeesInner() {
                     <td style={td}>{e.loginExecId ? <span style={{ fontVariantNumeric: 'tabular-nums' }}>{e.loginExecId}</span> : <span style={pill('muted')}>not linked</span>}</td>
                     <td style={td}>{e.department || '—'}</td>
                     <td style={td}>{e.shiftIn && e.shiftOut ? `${e.shiftIn}–${e.shiftOut}` : '—'}</td>
-                    <td style={td}>{DAYS[e.weeklyOffDay] ?? '—'}</td>
+                    <td style={{ ...td, whiteSpace: 'nowrap' }}>
+                      <select
+                        value={e.weeklyOffDay}
+                        onChange={ev => setWeeklyOff(e, Number(ev.target.value))}
+                        title={e.weeklyOffSet ? 'Weekly off day' : 'Not confirmed yet — pick the real weekly-off day'}
+                        style={{
+                          padding: '4px 6px', borderRadius: 6, fontSize: 12.5, color: 'var(--ink)', cursor: 'pointer',
+                          border: `1px solid ${e.weeklyOffSet ? 'rgba(15,40,85,0.2)' : 'rgba(201,164,114,0.75)'}`,
+                          background: e.weeklyOffSet ? '#fff' : 'rgba(201,164,114,0.1)',
+                        }}
+                      >
+                        {DAYS.map((d, i) => <option key={i} value={i}>{d}</option>)}
+                      </select>
+                      {!e.weeklyOffSet && <span style={pill('gold')}>set day?</span>}
+                    </td>
                     <td style={{ ...td, fontVariantNumeric: 'tabular-nums' }}>
                       {Number(e.monthlySalary) > 0 ? `₹${Number(e.monthlySalary).toLocaleString('en-IN')}` : '—'}
                     </td>
@@ -537,7 +570,7 @@ function blankEmployee(): Employee {
   return {
     id: '', machineCode: null, loginExecId: null, hrCode: '', name: '', department: null, designation: null,
     mobile: null, email: null, dob: null, joiningDate: null, monthlySalary: 0,
-    shiftIn: null, shiftOut: null, weeklyOffDay: 0, leavesCarryOver: false, carryOverDays: 0, active: true,
+    shiftIn: null, shiftOut: null, weeklyOffDay: 0, weeklyOffSet: true, leavesCarryOver: false, carryOverDays: 0, active: true,
   };
 }
 function emptyToNull(s: string | null): string | null { const t = (s ?? '').trim(); return t ? t : null; }
