@@ -53,7 +53,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         await q(
           `UPDATE "LeaveBalance"
               SET used = GREATEST(used - $3, 0),
-                  remaining = remaining + $3,
+                  remaining = LEAST(opening, remaining + $3),
                   "updatedAt" = NOW()
             WHERE "employeeId" = $1 AND "financialYear" = $2`,
           [emp.id, fy, balanceCredit],

@@ -22,6 +22,20 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const user = await requireAuth(req, res, { requireMfa: false });
   if (!user) return;
 
+  // Re-enrollment guard. First-time enrollment legitimately runs on a
+  // half-token (mfa=false) — that's how a new user gets promoted. But if a
+  // TOTP is ALREADY set, a half-token caller has only proven the PASSWORD,
+  // not possession of the existing authenticator. Letting them enroll a fresh
+  // secret would overwrite the victim's 2FA and bypass it outright. So once
+  // enrolled, only a caller who has already satisfied 2FA this session
+  // (_mfaPassed) may rotate the secret; otherwise the owner must reset it.
+  if (user.totpEnrolledAt && !user._mfaPassed) {
+    return res.status(403).json({
+      ok: false,
+      error: 'Two-factor is already set up on this account. Sign in with your current 6-digit code to change it, or ask the owner to reset it.',
+    });
+  }
+
   const body = req.body || {};
 
   // ── Phase 1: generate a secret + QR ────────────────────────

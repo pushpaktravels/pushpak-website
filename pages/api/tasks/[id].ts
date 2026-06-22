@@ -37,6 +37,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const existing = await queryOne<TaskRow>(`SELECT * FROM "Task" WHERE id = $1`, [id]);
   if (!existing) return res.status(404).json({ ok: false, error: 'Task not found' });
 
+  // Ownership gate. The Tasks view is universal, so without this any employee
+  // could PATCH ANY task by id — reassign it, rename it, mark someone else's
+  // done. A task is yours to touch only if you're its assignee or its creator;
+  // owner/admin oversee everything. (DELETE has its own stricter owner/admin
+  // gate below; this guards the PATCH path.)
+  const isManager = user.role === 'owner' || user.role === 'admin';
+  const ownsTask = existing.assigneeExecId === user.execId || existing.createdBy === user.execId;
+  if (!isManager && !ownsTask) {
+    return res.status(403).json({ ok: false, error: 'You can only change tasks assigned to you or that you created.' });
+  }
+
   if (req.method === 'PATCH') {
     if (!requireViewEdit(user, res, 'tasks')) return;
     const parsed = PatchBody.safeParse(req.body);

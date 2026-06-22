@@ -4,10 +4,13 @@
 // GET  ?date=YYYY-MM-DD  → all employees' attendance for that date,
 //                          joined with employee name/department.
 // PATCH { id, ... } → manual override. The owner can override ANY rule:
-//        status, the informed/green flag, remark, the IN/OUT punch times,
-//        and even the day-fraction deduction the engine computed. Any
-//        override sets overridden=TRUE so future re-uploads won't clobber
-//        the human call.
+//        status, the informed/green flag, remark, and the IN/OUT punch
+//        times. Any override sets overridden=TRUE so future re-uploads
+//        won't clobber the human call. The day-fraction deduction is NOT a
+//        manual field: it is always DERIVED from the chosen status, because
+//        that status is the only thing payroll reads. (Use the status — or
+//        "Excuse as paid" — to control pay; a hand-typed fraction never
+//        reached the salary run.)
 //        Convenience: { excusePaid:true } excuses the day as paid leave
 //        (status SPECIAL_PAID, informed, zero deduction) in one shot.
 //
@@ -47,7 +50,6 @@ const Patch = z.object({
   remark: z.string().max(500).optional(),
   actualIn: timeField,
   actualOut: timeField,
-  deductionDays: z.number().min(0).max(1).optional(),
   excusePaid: z.boolean().optional(),
 });
 
@@ -97,13 +99,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const newIn = p.actualIn === undefined ? existing.actualIn : (p.actualIn || null);
     const newOut = p.actualOut === undefined ? existing.actualOut : (p.actualOut || null);
 
-    // Deduction precedence: an explicit number wins; excuse forces 0; else the
-    // status' raw deduction; else keep what was there.
-    const deduction = excuse
-      ? 0
-      : p.deductionDays !== undefined
-        ? p.deductionDays
-        : (RAW_DEDUCTION[newStatus] ?? existing.deductionDays);
+    // Deduction is DERIVED from status — the single lever payroll reads.
+    // "Excuse as paid" forces 0; otherwise the status' raw day-fraction (and
+    // if somehow unknown, we keep whatever was there). No manual override:
+    // a hand-typed fraction never reached payroll, so it's gone from the UI.
+    const deduction = excuse ? 0 : (RAW_DEDUCTION[newStatus] ?? existing.deductionDays);
 
     await query(
       `UPDATE "DailyAttendance" SET

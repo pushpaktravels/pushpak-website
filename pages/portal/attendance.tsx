@@ -183,7 +183,6 @@ function AttendanceRow({ row, onSaved, onError }: { row: Row; onSaved: () => voi
   const [remark, setRemark] = useState(row.remark || '');
   const [actualIn, setActualIn] = useState(hhmm(row.actualIn));
   const [actualOut, setActualOut] = useState(hhmm(row.actualOut));
-  const [ded, setDed] = useState(String(Number(row.deductionDays) || 0));
   const [saving, setSaving] = useState(false);
   const [busy, setBusy] = useState(false);
 
@@ -199,10 +198,11 @@ function AttendanceRow({ row, onSaved, onError }: { row: Row; onSaved: () => voi
 
   async function save() {
     setSaving(true);
-    const dedNum = Math.max(0, Math.min(1, Number(ded) || 0));
+    // No deductionDays sent — it's derived server-side from the chosen status
+    // (the only thing payroll reads). Status / "Excuse as paid" control pay.
     const ok = await patch({
       status, isInformed: informed, remark,
-      actualIn, actualOut, deductionDays: dedNum,
+      actualIn, actualOut,
     });
     setSaving(false);
     if (ok) { setEditing(false); onSaved(); }
@@ -237,9 +237,8 @@ function AttendanceRow({ row, onSaved, onError }: { row: Row; onSaved: () => voi
         <td style={td}>
           <input type="checkbox" checked={informed} onChange={e => setInformed(e.target.checked)} />
         </td>
-        <td style={td}>
-          <input style={{ ...inp, width: 60 }} type="number" min={0} max={1} step={0.5} value={ded} onChange={e => setDed(e.target.value)} />
-        </td>
+        <td style={{ ...td, color: 'var(--ink-soft)', fontStyle: 'italic' }}
+            title="The deduction is set automatically from the status you pick — pick the status (or use Excuse as paid) to control pay.">auto</td>
         <td style={td}>
           <input style={{ ...inp, width: 150 }} value={remark} placeholder="reason…" onChange={e => setRemark(e.target.value)} />
         </td>

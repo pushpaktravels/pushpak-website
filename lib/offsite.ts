@@ -103,7 +103,9 @@ export function synthesizeMissing(inp: OffsiteMonthInput): MissingCounts {
   const [y, m] = inp.monthStart.split('-').map(Number);
   for (let day = 1; day <= inp.daysInMonth; day++) {
     const iso = `${y}-${String(m).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-    if (iso > inp.todayIso) break;                       // future — not yet counted
+    if (iso >= inp.todayIso) break;                      // today or later — not
+    // counted yet: the day isn't over, so a missing check-in today is NOT an
+    // absence (the employee may still punch in). Only ELAPSED days can be absent.
     if (inp.joiningIso && iso < inp.joiningIso) continue; // before joining
     if (inp.rowDates.has(iso)) continue;                 // already a real row
     const st = deriveMissingStatus({

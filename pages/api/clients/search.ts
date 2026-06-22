@@ -16,16 +16,28 @@ import { query } from '@/lib/pg';
 import { requireAuth } from '@/lib/auth';
 import { canAccessView } from '@/lib/views';
 
-// Any one of these capabilities admits the client search.
-const ALLOW_VIEWS = ['reservations', 'card-log', 'query-fill', 'worklist', 'finbook', 'vendor-pay'];
+// Who may SEARCH the client master (name typeahead). 'query-fill' is in here
+// because a form-filler picks which account a query is about — but note it is
+// a UNIVERSAL view (every role holds it), so this list effectively opens the
+// NAME search to all staff. That's fine: a name is not financial data.
+const SEARCH_VIEWS = ['reservations', 'card-log', 'query-fill', 'worklist', 'finbook', 'vendor-pay'];
+
+// Who may additionally see the OUTSTANDING BALANCE. This is finance context,
+// so it is the booking + accounts desks only — NOT the universal 'query-fill'.
+// A delinquent's due is exactly what a booker/collector should see (booking
+// hold for defaulters); a driver filing a courier form has no business seeing
+// any client's balance. Keeping 'query-fill' out of THIS list is what closes
+// the leak while leaving the account picker working for everyone.
+const BALANCE_VIEWS = ['reservations', 'card-log', 'worklist', 'finbook', 'vendor-pay'];
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'GET') return res.status(405).json({ ok: false, error: 'Method not allowed' });
   const user = await requireAuth(req, res);
   if (!user) return;
-  if (!ALLOW_VIEWS.some(v => canAccessView(user, v))) {
+  if (!SEARCH_VIEWS.some(v => canAccessView(user, v))) {
     return res.status(403).json({ ok: false, error: 'Not allowed' });
   }
+  const showBalance = BALANCE_VIEWS.some(v => canAccessView(user, v));
 
   const q = String(req.query.q || '').trim();
   if (q.length < 2) return res.json({ ok: true, clients: [] });
@@ -40,6 +52,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   );
   return res.json({
     ok: true,
-    clients: rows.map((r) => ({ party: r.party, family: r.family, outstanding: Number(r.bill) || 0 })),
+    // Balance is zeroed for non-finance desks so the picker shows no "due"
+    // badge (ClientPicker only renders it when outstanding > 0).
+    clients: rows.map((r) => ({
+      party: r.party,
+      family: r.family,
+      outstanding: showBalance ? (Number(r.bill) || 0) : 0,
+    })),
   });
 }
