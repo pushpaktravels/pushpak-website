@@ -25,6 +25,7 @@ type Employee = {
   shiftOut: string | null;
   weeklyOffDay: number;
   weeklyOffSet: boolean;
+  attendanceMode: string;
   leavesCarryOver: boolean;
   carryOverDays: string | number;
   active: boolean;
@@ -218,6 +219,21 @@ function EmployeesInner() {
     } catch (e: any) { setError(e.message); load(); }
   }
 
+  // Inline attendance-mode switch from the table: 'biometric' (office
+  // machine) ↔ 'offsite' (self check-in for field / second-location staff).
+  async function setAttendanceMode(emp: Employee, mode: string) {
+    setError(null);
+    setEmployees(list => list.map(x => x.id === emp.id ? { ...x, attendanceMode: mode } : x));
+    try {
+      const r = await fetch('/api/attendance/employees', {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: emp.id, attendanceMode: mode }),
+      });
+      const d = await r.json();
+      if (!d.ok) { setError(d.error || 'Could not change attendance mode'); load(); }
+    } catch (e: any) { setError(e.message); load(); }
+  }
+
   return (
     <div style={{ maxWidth: 1280, margin: '0 auto', padding: '4px 4px 60px' }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 16, marginBottom: 18, flexWrap: 'wrap' }}>
@@ -305,6 +321,7 @@ function EmployeesInner() {
                     {weeklyOffOpts.map(d => <option key={d} value={d}>{d}</option>)}
                   </select>
                 </th>
+                <th style={th}>Attendance</th>
                 <th style={th}>Salary
                   <select style={filterInp} value={filters.salary} onChange={e => setFilter('salary', e.target.value)}>
                     <option value="">All</option>
@@ -324,7 +341,7 @@ function EmployeesInner() {
             </thead>
             <tbody>
               {visible.length === 0 ? (
-                <tr><td style={{ ...td, color: 'var(--ink-soft)' }} colSpan={10}>No employees match.</td></tr>
+                <tr><td style={{ ...td, color: 'var(--ink-soft)' }} colSpan={11}>No employees match.</td></tr>
               ) : visible.map(e => {
                 const stub = e.hrCode.startsWith('BIO-');
                 const noSalary = Number(e.monthlySalary) === 0;
@@ -353,6 +370,21 @@ function EmployeesInner() {
                         {DAYS.map((d, i) => <option key={i} value={i}>{d}</option>)}
                       </select>
                       {!e.weeklyOffSet && <span style={pill('gold')}>set day?</span>}
+                    </td>
+                    <td style={{ ...td, whiteSpace: 'nowrap' }}>
+                      <select
+                        value={e.attendanceMode || 'biometric'}
+                        onChange={ev => setAttendanceMode(e, ev.target.value)}
+                        title="How this employee's attendance is recorded"
+                        style={{
+                          padding: '4px 6px', borderRadius: 6, fontSize: 12.5, color: 'var(--ink)', cursor: 'pointer',
+                          border: `1px solid ${e.attendanceMode === 'offsite' ? 'rgba(46,108,84,0.6)' : 'rgba(15,40,85,0.2)'}`,
+                          background: e.attendanceMode === 'offsite' ? 'rgba(46,108,84,0.08)' : '#fff',
+                        }}
+                      >
+                        <option value="biometric">Office</option>
+                        <option value="offsite">Offsite</option>
+                      </select>
                     </td>
                     <td style={{ ...td, fontVariantNumeric: 'tabular-nums' }}>
                       {Number(e.monthlySalary) > 0 ? `₹${Number(e.monthlySalary).toLocaleString('en-IN')}` : '—'}
@@ -485,6 +517,7 @@ function EditDrawer({ employee, onClose, onSaved, onError }: {
       monthlySalary: Number(f.monthlySalary) || 0,
       shiftIn: emptyToNull(f.shiftIn), shiftOut: emptyToNull(f.shiftOut),
       weeklyOffDay: Number(f.weeklyOffDay) || 0,
+      attendanceMode: f.attendanceMode === 'offsite' ? 'offsite' : 'biometric',
       leavesCarryOver: !!f.leavesCarryOver, carryOverDays: Number(f.carryOverDays) || 0,
       active: !!f.active,
     };
@@ -550,11 +583,19 @@ function EditDrawer({ employee, onClose, onSaved, onError }: {
             </Field>
             <Field label="Carry-over Days"><input style={inp} type="number" value={f.carryOverDays} onChange={e => set('carryOverDays', e.target.value as any)} /></Field>
           </Row>
-          <Field label="Active">
-            <select style={inp} value={f.active ? '1' : '0'} onChange={e => set('active', e.target.value === '1' as any)}>
-              <option value="1">Active</option><option value="0">Inactive</option>
-            </select>
-          </Field>
+          <Row>
+            <Field label="Attendance">
+              <select style={inp} value={f.attendanceMode === 'offsite' ? 'offsite' : 'biometric'} onChange={e => set('attendanceMode', e.target.value as any)}>
+                <option value="biometric">Office (biometric)</option>
+                <option value="offsite">Offsite (self check-in)</option>
+              </select>
+            </Field>
+            <Field label="Active">
+              <select style={inp} value={f.active ? '1' : '0'} onChange={e => set('active', e.target.value === '1' as any)}>
+                <option value="1">Active</option><option value="0">Inactive</option>
+              </select>
+            </Field>
+          </Row>
         </div>
         <div style={{ display: 'flex', gap: 10, marginTop: 22 }}>
           <button onClick={save} disabled={saving} style={btnPrimary}>{saving ? 'Saving…' : 'Save'}</button>
@@ -571,6 +612,7 @@ function blankEmployee(): Employee {
     id: '', machineCode: null, loginExecId: null, hrCode: '', name: '', department: null, designation: null,
     mobile: null, email: null, dob: null, joiningDate: null, monthlySalary: 0,
     shiftIn: null, shiftOut: null, weeklyOffDay: 0, weeklyOffSet: true, leavesCarryOver: false, carryOverDays: 0, active: true,
+    attendanceMode: 'biometric',
   };
 }
 function emptyToNull(s: string | null): string | null { const t = (s ?? '').trim(); return t ? t : null; }

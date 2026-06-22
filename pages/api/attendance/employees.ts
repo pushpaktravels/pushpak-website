@@ -17,6 +17,7 @@ import { query, queryOne, newId } from '@/lib/pg';
 import { requireAuth } from '@/lib/auth';
 import { requireView, requireViewEdit } from '@/lib/views';
 import { audit } from '@/lib/audit';
+import { ATTENDANCE_MODES } from '@/lib/offsite';
 
 const hhmm = z.string().regex(/^\d{1,2}:\d{2}$/, 'use HH:MM').nullable().optional();
 const dateStr = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'use YYYY-MM-DD').nullable().optional();
@@ -37,6 +38,7 @@ const Base = {
   shiftOut: hhmm,
   weeklyOffDay: z.number().int().min(0).max(6).optional(),
   weeklyOffSet: z.boolean().optional(),
+  attendanceMode: z.enum(ATTENDANCE_MODES).optional(),
   leavesCarryOver: z.boolean().optional(),
   carryOverDays: z.number().min(0).optional(),
   active: z.boolean().optional(),
@@ -54,7 +56,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const rows = await query(
       `SELECT id, "machineCode", "loginExecId", "hrCode", name, department, designation, mobile, email,
               dob, "joiningDate", "monthlySalary", "shiftIn", "shiftOut", "weeklyOffDay", "weeklyOffSet",
-              "leavesCarryOver", "carryOverDays", active, "createdAt", "updatedAt"
+              "attendanceMode", "leavesCarryOver", "carryOverDays", active, "createdAt", "updatedAt"
          FROM "Employee"
         ORDER BY active DESC, department NULLS LAST, name`,
     );
@@ -79,12 +81,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       `INSERT INTO "Employee"
         (id, "machineCode", "hrCode", name, department, designation, mobile, email,
          dob, "joiningDate", "monthlySalary", "shiftIn", "shiftOut", "weeklyOffDay", "weeklyOffSet",
-         "leavesCarryOver", "carryOverDays", active, "createdAt", "updatedAt")
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,NOW(),NOW())`,
+         "attendanceMode", "leavesCarryOver", "carryOverDays", active, "createdAt", "updatedAt")
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,NOW(),NOW())`,
       [id, d.machineCode ?? null, d.hrCode, d.name, d.department ?? null, d.designation ?? null,
        d.mobile ?? null, d.email ?? null, d.dob ?? null, d.joiningDate ?? null,
        d.monthlySalary ?? 0, d.shiftIn ?? null, d.shiftOut ?? null, d.weeklyOffDay ?? 0,
        d.weeklyOffSet ?? true,   // a manual create is an explicit setup → confirmed
+       d.attendanceMode ?? 'biometric',
        d.leavesCarryOver ?? false, d.carryOverDays ?? 0, d.active ?? true],
     );
     audit(req, user, 'EMPLOYEE_CREATE', id, { hrCode: d.hrCode, name: d.name });
@@ -123,6 +126,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       designation: d.designation, mobile: d.mobile, email: d.email, dob: d.dob,
       joiningDate: d.joiningDate, monthlySalary: d.monthlySalary, shiftIn: d.shiftIn,
       shiftOut: d.shiftOut, weeklyOffDay: d.weeklyOffDay, weeklyOffSet,
+      attendanceMode: d.attendanceMode,
       leavesCarryOver: d.leavesCarryOver, carryOverDays: d.carryOverDays, active: d.active,
     };
     const sets: string[] = [];

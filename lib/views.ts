@@ -126,6 +126,10 @@ export const VIEWS: ViewRow[] = [
   { key: 'employees',           label: 'Employees',           roles: ['owner', 'admin', 'hr'] },
   { key: 'payroll',             label: 'Payroll',             roles: ['owner', 'admin', 'hr'] },
   { key: 'overtime',            label: 'Overtime',            roles: ['owner', 'admin', 'hr'] },
+  { key: 'offsite',             label: 'Offsite Attendance',  roles: ['owner', 'admin', 'hr'] },
+  // HR records leave on behalf of staff who can't file it themselves
+  // (support / field people). Same engine as self-service 'leave'.
+  { key: 'leave-admin',         label: 'Record Leave',        roles: ['owner', 'admin', 'hr'] },
   // Governance / settings.
   { key: 'users-auth',          label: 'Users & Authorities', roles: ['owner'] },
   { key: 'bulk-cm',             label: 'Bulk CM Assignment',  roles: ['owner', 'admin'] },

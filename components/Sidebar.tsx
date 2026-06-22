@@ -79,6 +79,9 @@ const SECTIONS: NavSection[] = [
       // Self-service leave — universal like Tasks; the page self-scopes to the
       // caller's own employee record, so it's safe for every logged-in user.
       { view: 'leave',     label: 'My Leave',   href: '/portal/leave',   roles: [...ROLE_SLUGS], dept: 'personal', icon: <svg viewBox="0 0 24 24"><path d="M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z"/><path d="M9 16h6"/></svg> },
+      // Self check-in for offsite/field staff — universal & self-scoping like
+      // My Leave; the page itself shows a notice to anyone not on offsite mode.
+      { view: 'checkin',   label: 'My Check-in', href: '/portal/checkin', roles: [...ROLE_SLUGS], dept: 'personal', icon: <svg viewBox="0 0 24 24"><path d="M21 10c0 6-9 12-9 12s-9-6-9-12a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg> },
       { view: 'profile',   label: 'My Profile', href: '/portal/profile', roles: ['owner','admin','cm-accounts','accounts','insights'], dept: 'personal', icon: <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg> },
     ],
   },
@@ -223,6 +226,8 @@ const SECTIONS: NavSection[] = [
       { view: 'employees',  label: 'Employees',  href: '/portal/employees',  roles: ['owner','admin','hr'], dept: 'hr', icon: <svg viewBox="0 0 24 24"><circle cx="9" cy="7" r="4"/><path d="M3 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2M16 3.13a4 4 0 0 1 0 7.75M21 21v-2a4 4 0 0 0-3-3.87"/></svg> },
       { view: 'payroll',    label: 'Payroll',    href: '/portal/payroll',    roles: ['owner','admin','hr'], dept: 'hr', icon: <svg viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="2"/><circle cx="12" cy="12" r="3"/><path d="M6 9v.01M18 15v.01"/></svg> },
       { view: 'overtime',   label: 'Overtime',   href: '/portal/overtime',   roles: ['owner','admin','hr'], dept: 'hr', icon: <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg> },
+      { view: 'offsite',    label: 'Offsite Attendance', href: '/portal/offsite', roles: ['owner','admin','hr'], dept: 'hr', icon: <svg viewBox="0 0 24 24"><path d="M21 10c0 6-9 12-9 12s-9-6-9-12a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg> },
+      { view: 'leave-admin', label: 'Record Leave', href: '/portal/leave-admin', roles: ['owner','admin','hr'], dept: 'hr', icon: <svg viewBox="0 0 24 24"><path d="M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z"/><path d="M12 14v4M10 16h4"/></svg> },
     ],
   },
 

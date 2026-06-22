@@ -26,6 +26,18 @@ import {
   computePayroll, daysInCalendarMonth, financialYearOf, monthRange,
   DEFAULT_LEAVE_ENTITLEMENT, type PayrollCounts,
 } from '@/lib/payroll';
+import { synthesizeMissing } from '@/lib/offsite';
+
+// Server "today" in IST — offsite synthesis must not count future days.
+const IST_OFFSET_MS = 5.5 * 3600 * 1000;
+function istTodayIso(): string {
+  const ist = new Date(Date.now() + IST_OFFSET_MS);
+  return `${ist.getUTCFullYear()}-${String(ist.getUTCMonth() + 1).padStart(2, '0')}-${String(ist.getUTCDate()).padStart(2, '0')}`;
+}
+function dateToIso(d: any): string {
+  return typeof d === 'string' ? d.slice(0, 10)
+    : `${new Date(d).getUTCFullYear()}-${String(new Date(d).getUTCMonth() + 1).padStart(2, '0')}-${String(new Date(d).getUTCDate()).padStart(2, '0')}`;
+}
 
 function tally(rows: { status: string; isOvertime?: boolean }[]): PayrollCounts {
   const c: PayrollCounts = {
@@ -72,13 +84,13 @@ async function gather(month: string): Promise<EmpBundle[]> {
 
   const employees = await query<any>(
     `SELECT id, name, "hrCode", department, designation, "monthlySalary",
-            "leavesCarryOver", "carryOverDays"
+            "leavesCarryOver", "carryOverDays", "attendanceMode", "weeklyOffDay", "joiningDate"
        FROM "Employee" WHERE active = TRUE ORDER BY department NULLS LAST, name`,
   );
   if (employees.length === 0) return [];
 
   const monthRows = await query<any>(
-    `SELECT "employeeId", status, "isOvertime" FROM "DailyAttendance"
+    `SELECT "employeeId", date, status, "isOvertime" FROM "DailyAttendance"
       WHERE date >= $1 AND date < $2`,
     [start, end],
   );
@@ -98,20 +110,79 @@ async function gather(month: string): Promise<EmpBundle[]> {
   );
 
   const rowsByEmp = new Map<string, any[]>();
+  const rowDatesByEmp = new Map<string, Set<string>>();
   for (const r of monthRows) {
     if (!rowsByEmp.has(r.employeeId)) rowsByEmp.set(r.employeeId, []);
     rowsByEmp.get(r.employeeId)!.push(r);
+    if (!rowDatesByEmp.has(r.employeeId)) rowDatesByEmp.set(r.employeeId, new Set());
+    rowDatesByEmp.get(r.employeeId)!.add(dateToIso(r.date));
   }
   const priorByEmp = new Map(priorLeave.map(r => [r.employeeId, r.n]));
   const ytdByEmp = new Map(ytdLeave.map(r => [r.employeeId, r.n]));
 
-  return employees.map(emp => ({
-    emp,
-    counts: tally(rowsByEmp.get(emp.id) || []),
-    priorLeaveDaysInFY: priorByEmp.get(emp.id) || 0,
-    totalLeaveDaysFYToDate: ytdByEmp.get(emp.id) || 0,
-    entitlement: entitlementOf(emp),
-  }));
+  // ── Offsite auto-absent ──────────────────────────────────────────
+  // Offsite staff never appear in the biometric file, so their only rows
+  // are self check-ins. Every ELAPSED working day with no row is a missed
+  // (ABSENT) day; weekly-offs/holidays stay paid, declared leaves stay
+  // leave, future days don't count. Synthesized in-memory so the preview
+  // still writes nothing. (Cross-FY paid-leave cap for offsite leans on
+  // the LeaveBalance drawn at declaration time, since there are no LEAVE
+  // rows to count here.)
+  const daysInMonth = daysInCalendarMonth(month);
+  const todayIso = istTodayIso();
+  const offsiteIds = employees.filter(e => e.attendanceMode === 'offsite').map(e => e.id);
+  const holidaySet = new Set<string>();
+  const leaveByEmpDate = new Map<string, Map<string, 'FULL' | 'HALF'>>();
+  if (offsiteIds.length > 0) {
+    const hols = await query<any>(`SELECT date FROM "Holiday" WHERE date >= $1 AND date < $2`, [start, end]);
+    for (const h of hols) holidaySet.add(dateToIso(h.date));
+    const leaves = await query<any>(
+      `SELECT "employeeId", "fromDate", "toDate", kind FROM "LeaveRequest"
+        WHERE status = 'APPROVED' AND "employeeId" = ANY($1::text[])
+          AND "fromDate" < $3 AND "toDate" >= $2`,
+      [offsiteIds, start, end],
+    );
+    const [yy, mm] = month.split('-').map(Number);
+    for (const l of leaves) {
+      const kind = l.kind === 'HALF_DAY' ? 'HALF' : (l.kind === 'FULL_DAY' ? 'FULL' : null);
+      if (!kind) continue;
+      const from = dateToIso(l.fromDate), to = dateToIso(l.toDate);
+      let m = leaveByEmpDate.get(l.employeeId);
+      if (!m) { m = new Map(); leaveByEmpDate.set(l.employeeId, m); }
+      for (let day = 1; day <= daysInMonth; day++) {
+        const iso = `${yy}-${String(mm).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+        if (iso >= from && iso <= to) m.set(iso, kind as 'FULL' | 'HALF');
+      }
+    }
+  }
+
+  return employees.map(emp => {
+    const counts = tally(rowsByEmp.get(emp.id) || []);
+    if (emp.attendanceMode === 'offsite') {
+      const miss = synthesizeMissing({
+        monthStart: start,
+        daysInMonth,
+        weeklyOffDay: Number(emp.weeklyOffDay) || 0,
+        holidays: holidaySet,
+        rowDates: rowDatesByEmp.get(emp.id) || new Set(),
+        leaveDates: leaveByEmpDate.get(emp.id) || new Map(),
+        todayIso,
+        joiningIso: emp.joiningDate ? dateToIso(emp.joiningDate) : null,
+      });
+      counts.absent += miss.absent;
+      counts.offDay += miss.offDay;
+      counts.holiday += miss.holiday;
+      counts.leave += miss.leave;
+      counts.halfDay += miss.halfDay;
+    }
+    return {
+      emp,
+      counts,
+      priorLeaveDaysInFY: priorByEmp.get(emp.id) || 0,
+      totalLeaveDaysFYToDate: ytdByEmp.get(emp.id) || 0,
+      entitlement: entitlementOf(emp),
+    };
+  });
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
