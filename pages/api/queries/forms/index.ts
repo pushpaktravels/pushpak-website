@@ -15,7 +15,7 @@ import { z } from 'zod';
 import { query, queryOne, newId } from '@/lib/pg';
 import { requireAuth } from '@/lib/auth';
 import { requireView } from '@/lib/views';
-import { formInDept } from '@/lib/queries';
+import { canFillForm } from '@/lib/queries';
 
 const FieldSchema = z.object({
   key: z.string().min(1).max(40),
@@ -47,19 +47,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   return res.status(405).json({ ok: false, error: 'Method not allowed' });
 }
 
-// Can this user fill this form? Owner/admin always (they manage the
-// registry). Otherwise BOTH gates must pass: the role gate (empty fillRoles =
-// everyone, else the role must be listed) AND the department gate (fillDepts
-// 'all', or the role's department is listed). This is what makes "not every
-// form visible to all" real — a form pinned to e.g. ['accounts'] only shows
-// to the accounts desk.
-function canFill(user: any, form: { fillRoles?: string[]; fillDepts?: string[] }): boolean {
-  if (user.role === 'owner' || user.role === 'admin') return true;
-  const fillRoles = form.fillRoles || [];
-  if (fillRoles.length > 0 && !fillRoles.includes(user.role)) return false;
-  return formInDept(user.role, form.fillDepts);
-}
-
 async function listForms(req: NextApiRequest, res: NextApiResponse, user: any) {
   const mode = typeof req.query.mode === 'string' ? req.query.mode : 'fill';
 
@@ -85,7 +72,7 @@ async function listForms(req: NextApiRequest, res: NextApiResponse, user: any) {
   // Fill mode: forms the caller may fill. Needs the broad 'query-fill' view.
   if (!requireView(user, res, 'query-fill')) return;
   const rows = await query<any>(`SELECT * FROM "QueryForm" WHERE active = TRUE ORDER BY "sortOrder", title`);
-  const forms = rows.filter((f) => canFill(user, f));
+  const forms = rows.filter((f) => canFillForm(user, f));
   return res.json({ ok: true, forms });
 }
 

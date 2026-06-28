@@ -100,6 +100,30 @@ export function formInDept(role: string, fillDepts: string[] | null | undefined)
   return !!d && depts.includes(d);
 }
 
+// Can THIS user fill THIS form? The single fill-permission chokepoint, used
+// by the Fill-a-Query API. The rule, in order:
+//   1. owner / admin                 → always (they manage the registry)
+//   2. user has a per-user form list → AUTHORITATIVE: they may fill exactly
+//      the forms in formPerms (by key), nothing else. This mirrors viewPerms
+//      in lib/views.ts — an explicit list REPLACES the defaults, so the owner
+//      can both widen (grant a form their role wouldn't get) AND narrow
+//      (restrict someone to a couple of forms) from Users & Authorities.
+//   3. no per-user list              → the form's own fillRoles + fillDepts
+//      decide, exactly as before. Empty/absent formPerms = inherit, so every
+//      existing user is completely unaffected until the owner curates a list.
+// Keep this in lock-step with the per-employee grid in users-auth.tsx.
+export function canFillForm(
+  user: { role: string; formPerms?: string[] | null },
+  form: { key: string; fillRoles?: string[] | null; fillDepts?: string[] | null },
+): boolean {
+  if (user.role === 'owner' || user.role === 'admin') return true;
+  const perms = user.formPerms;
+  if (perms && perms.length > 0) return perms.includes(form.key);
+  const fillRoles = form.fillRoles || [];
+  if (fillRoles.length > 0 && !fillRoles.includes(user.role)) return false;
+  return formInDept(user.role, form.fillDepts);
+}
+
 // Where a submitted form lands. Default (undefined/null) = a generic Query on
 // the accounts "Queries" desk. 'vendor-payment' = the submission becomes a
 // VendorPayment row instead, so the one Vendor Payments module is both the

@@ -37,6 +37,8 @@ const Update = z.object({
   email: z.string().email().max(120).nullable().optional(),
   viewPerms: z.array(z.string().min(1).max(60)).max(60).optional(),
   viewReadOnly: z.array(z.string().min(1).max(60)).max(60).optional(),
+  // Per-user form-fill override (QueryForm.key slugs). Empty = inherit role default.
+  formPerms: z.array(z.string().min(1).max(60)).max(60).optional(),
   // ── Per-user account security ──
   mfaRequired: z.boolean().optional(),         // mandate 2FA for this user
   mustChangePassword: z.boolean().optional(),  // force a change at next sign-in
@@ -58,6 +60,7 @@ const CreateBody = z.object({
   scoreboard: z.boolean().optional(),
   viewPerms: z.array(z.string().min(1).max(60)).max(60).optional(),
   viewReadOnly: z.array(z.string().min(1).max(60)).max(60).optional(),
+  formPerms: z.array(z.string().min(1).max(60)).max(60).optional(),
   mfaRequired: z.boolean().optional(),
   mustChangePassword: z.boolean().optional(),
 });
@@ -72,7 +75,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     try {
       const rows = await query<any>(
         `SELECT id, "execId", name, role, badge, team, active, scoreboard, email,
-                "viewPerms", "viewReadOnly", "totpEnrolledAt", "mfaRequired",
+                "viewPerms", "viewReadOnly", "formPerms", "totpEnrolledAt", "mfaRequired",
                 "failedAttempts", "lockedUntil", "mustChangePassword",
                 "passwordChangedAt", "lastLoginAt", "lastLoginIp", "createdAt"
          FROM "User"
@@ -122,14 +125,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       await query(
         `INSERT INTO "User"
           (id, "execId", name, role, "passwordHash", badge, team, scoreboard,
-           active, "viewPerms", "viewReadOnly", "mfaRequired", "mustChangePassword",
+           active, "viewPerms", "viewReadOnly", "formPerms", "mfaRequired", "mustChangePassword",
            "passwordChangedAt", "updatedAt")
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true, $9, $10, $11, $12, NOW(), NOW())`,
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true, $9, $10, $11, $12, $13, NOW(), NOW())`,
         [
           id, body.execId, body.name, body.role, passwordHash,
           body.badge || roleBadge(body.role),
           body.team || [], body.scoreboard ?? false,
-          body.viewPerms || [], body.viewReadOnly || [],
+          body.viewPerms || [], body.viewReadOnly || [], body.formPerms || [],
           body.mfaRequired ?? false, body.mustChangePassword ?? false,
         ]
       );
@@ -180,6 +183,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           if (u.scoreboard   !== undefined) { sets.push(`scoreboard     = $${p++}`); params.push(u.scoreboard); }
           if (u.viewPerms    !== undefined) { sets.push(`"viewPerms"    = $${p++}`); params.push(u.viewPerms); }
           if (u.viewReadOnly !== undefined) { sets.push(`"viewReadOnly" = $${p++}`); params.push(u.viewReadOnly); }
+          if (u.formPerms    !== undefined) { sets.push(`"formPerms"    = $${p++}`); params.push(u.formPerms); }
           if (u.email        !== undefined) { sets.push(`email          = $${p++}`); params.push(u.email); }
           if (u.mfaRequired  !== undefined) { sets.push(`"mfaRequired"  = $${p++}`); params.push(u.mfaRequired); ev(u.mfaRequired ? 'MFA_REQUIRED_ON' : 'MFA_REQUIRED_OFF'); }
 

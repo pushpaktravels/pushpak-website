@@ -36,7 +36,12 @@ import type { NextApiResponse } from 'next';
 import { ROLE_SLUGS, INSIGHTS_ONLY_EXEC_IDS } from './roles';
 import { roleHasDefaultView } from './roledefaults';
 
-export type ViewRow = { key: string; label: string; roles: string[] };
+// `group` = the department / module this view belongs to. It is
+// PRESENTATION-ONLY: it has no effect on access (canAccessView never reads
+// it). It exists so the Users & Authorities permission grid can bucket the
+// per-user toggles under a department sub-heading instead of one long flat
+// list. Every view must carry one; the heading order lives in VIEW_GROUPS.
+export type ViewRow = { key: string; label: string; roles: string[]; group: string };
 
 // Views an "insights-only" identity (e.g. Vishal) may reach. The Command
 // Center IS the firm overview — financials + workforce + attendance +
@@ -47,95 +52,113 @@ export const INSIGHTS_ONLY_VIEWS = new Set<string>(['overview']);
 
 export const VIEWS: ViewRow[] = [
   // Personal — every role, every user (also bypassed in the Sidebar).
-  { key: 'dashboard',           label: 'Dashboard',           roles: [...ROLE_SLUGS] },
-  { key: 'profile',             label: 'My Profile',          roles: [...ROLE_SLUGS] },
+  { key: 'dashboard',           label: 'Dashboard',           group: 'Personal',              roles: [...ROLE_SLUGS] },
+  { key: 'profile',             label: 'My Profile',          group: 'Personal',              roles: [...ROLE_SLUGS] },
   // Internal chat — universal like the personal views (forced-allowed in
   // canAccessView below), so it is never blocked by a narrow viewPerms list.
   // The insights-only executive (Vishal) is the sole exception.
-  { key: 'messages',            label: 'Messages',            roles: [...ROLE_SLUGS] },
+  { key: 'messages',            label: 'Messages',            group: 'Personal',              roles: [...ROLE_SLUGS] },
+  // Tasks is a personal inbox (universal, like Messages).
+  { key: 'tasks',               label: 'Tasks',               group: 'Personal',              roles: [...ROLE_SLUGS] },
   // Command Center — the owner's company-wide executive overview
   // (financials + workforce + attendance + team performance). Owners
   // only by default; grantable to others via viewPerms.
-  { key: 'overview',            label: 'Command Center',      roles: ['owner'] },
-  // Shared foundation — cross-department primitives every module links through.
-  // Tasks is a personal inbox (universal, like Messages); Leads is the
-  // sales pipeline shared by Marketing and the booking/visa/package desks.
-  { key: 'tasks',               label: 'Tasks',               roles: [...ROLE_SLUGS] },
-  { key: 'leads',               label: 'Leads',               roles: ['owner', 'admin', 'marketing', 'domestic-reservations', 'domestic-package', 'international-packages', 'visa'] },
+  { key: 'overview',            label: 'Command Center',      group: 'Command Center',        roles: ['owner'] },
   // Followup / Accounts module.
-  { key: 'followup-dashboard',  label: 'Followup Dashboard',  roles: ['owner', 'admin', 'cm-accounts', 'accounts', 'insights'] },
-  { key: 'worklist',            label: 'My Worklist',         roles: ['owner', 'admin', 'cm-accounts', 'accounts'] },
-  { key: 'team-worklist',       label: 'Team Worklist',       roles: ['owner', 'admin', 'cm-accounts'] },
-  { key: 'hold-check',          label: 'Hold Check',          roles: ['owner', 'admin', 'cm-accounts', 'accounts'] },
-  { key: 'families',            label: 'Clients & Families',  roles: ['owner', 'admin'] },
-  { key: 'promises',            label: 'Promise Ledger',      roles: ['owner', 'admin', 'cm-accounts', 'accounts'] },
-  { key: 'payment-plans',       label: 'Doubtful Ledger',     roles: ['owner', 'admin', 'cm-accounts', 'accounts'] },
-  { key: 'legal',               label: 'Legal Ledger',        roles: ['owner', 'admin', 'cm-accounts', 'accounts', 'insights'] },
-  { key: 'collections',         label: 'Collection List',     roles: ['owner', 'admin', 'cm-accounts', 'accounts', 'insights'] },
-  { key: 'upload',              label: 'Upload & Refresh',    roles: ['owner', 'admin'] },
-  { key: 'performance',         label: 'Performance',         roles: ['owner', 'admin', 'cm-accounts', 'accounts'] },
-  { key: 'scoreboard',          label: 'Scoreboard',          roles: ['owner', 'admin', 'cm-accounts'] },
-  { key: 'insights',            label: 'Insights',            roles: ['owner', 'insights'] },
+  { key: 'followup-dashboard',  label: 'Followup Dashboard',  group: 'Accounts & Followup',   roles: ['owner', 'admin', 'cm-accounts', 'accounts', 'insights'] },
+  { key: 'worklist',            label: 'My Worklist',         group: 'Accounts & Followup',   roles: ['owner', 'admin', 'cm-accounts', 'accounts'] },
+  { key: 'team-worklist',       label: 'Team Worklist',       group: 'Accounts & Followup',   roles: ['owner', 'admin', 'cm-accounts'] },
+  { key: 'hold-check',          label: 'Hold Check',          group: 'Accounts & Followup',   roles: ['owner', 'admin', 'cm-accounts', 'accounts'] },
+  { key: 'families',            label: 'Clients & Families',  group: 'Accounts & Followup',   roles: ['owner', 'admin'] },
+  { key: 'promises',            label: 'Promise Ledger',      group: 'Accounts & Followup',   roles: ['owner', 'admin', 'cm-accounts', 'accounts'] },
+  { key: 'payment-plans',       label: 'Doubtful Ledger',     group: 'Accounts & Followup',   roles: ['owner', 'admin', 'cm-accounts', 'accounts'] },
+  { key: 'legal',               label: 'Legal Ledger',        group: 'Accounts & Followup',   roles: ['owner', 'admin', 'cm-accounts', 'accounts', 'insights'] },
+  { key: 'collections',         label: 'Collection List',     group: 'Accounts & Followup',   roles: ['owner', 'admin', 'cm-accounts', 'accounts', 'insights'] },
+  { key: 'upload',              label: 'Upload & Refresh',    group: 'Accounts & Followup',   roles: ['owner', 'admin'] },
+  { key: 'performance',         label: 'Performance',         group: 'Accounts & Followup',   roles: ['owner', 'admin', 'cm-accounts', 'accounts'] },
+  { key: 'scoreboard',          label: 'Scoreboard',          group: 'Accounts & Followup',   roles: ['owner', 'admin', 'cm-accounts'] },
+  { key: 'insights',            label: 'Insights',            group: 'Accounts & Followup',   roles: ['owner', 'insights'] },
   // Domestic Reservations module — booking workspace for the
   // domestic-reservations department. Owner/admin oversee; the desk
   // staff get these by default. Stand-alone (no Account link yet).
-  { key: 'reservations',          label: 'Reservations',        roles: ['owner', 'admin', 'domestic-reservations'] },
-  { key: 'reservations-dues',     label: 'Reservation Dues',    roles: ['owner', 'admin', 'domestic-reservations'] },
-  { key: 'reservations-worklist', label: 'Reservation Worklist',roles: ['owner', 'admin', 'domestic-reservations'] },
+  { key: 'reservations',          label: 'Reservations',        group: 'Domestic Reservations', roles: ['owner', 'admin', 'domestic-reservations'] },
+  { key: 'reservations-dues',     label: 'Reservation Dues',    group: 'Domestic Reservations', roles: ['owner', 'admin', 'domestic-reservations'] },
+  { key: 'reservations-worklist', label: 'Reservation Worklist',group: 'Domestic Reservations', roles: ['owner', 'admin', 'domestic-reservations'] },
   // Cross-department performance (Phase 3) — booking-desk leaderboard.
   // Owner/admin oversee; grant a desk lead via viewPerms to let them see it.
-  { key: 'reservations-performance', label: 'Desk Performance',  roles: ['owner', 'admin'] },
+  { key: 'reservations-performance', label: 'Desk Performance',  group: 'Domestic Reservations', roles: ['owner', 'admin'] },
   // Upcoming departments — placeholder workspaces (under construction).
   // The role + route + sidebar home are wired now so staff in these
   // departments land somewhere real; the modules get built in later phases.
-  { key: 'domestic-package',       label: 'Domestic Package',      roles: ['owner', 'admin', 'domestic-package'] },
-  { key: 'international-packages',  label: 'International Packages', roles: ['owner', 'admin', 'international-packages'] },
-  { key: 'visa',                   label: 'Visa',                  roles: ['owner', 'admin', 'visa'] },
-  { key: 'marketing',              label: 'Marketing',             roles: ['owner', 'admin', 'marketing'] },
+  { key: 'domestic-package',       label: 'Domestic Package',      group: 'Packages & Visa',    roles: ['owner', 'admin', 'domestic-package'] },
+  { key: 'international-packages',  label: 'International Packages', group: 'Packages & Visa',    roles: ['owner', 'admin', 'international-packages'] },
+  { key: 'visa',                   label: 'Visa',                  group: 'Packages & Visa',    roles: ['owner', 'admin', 'visa'] },
+  // Marketing & Leads — campaigns + the shared sales pipeline (leads is
+  // used by Marketing and the booking/visa/package desks).
+  { key: 'marketing',              label: 'Marketing',             group: 'Marketing & Leads',  roles: ['owner', 'admin', 'marketing'] },
+  { key: 'leads',                  label: 'Leads',                 group: 'Marketing & Leads',  roles: ['owner', 'admin', 'marketing', 'domestic-reservations', 'domestic-package', 'international-packages', 'visa'] },
   // FinBook accounting integration — live ledger / credit-limit lookup and
   // (later) the sync/reconciliation console. Accounts staff + oversight.
-  { key: 'finbook',             label: 'FinBook',             roles: ['owner', 'admin', 'cm-accounts', 'accounts'] },
+  { key: 'finbook',             label: 'FinBook',             group: 'Bookkeeping (FinBook)', roles: ['owner', 'admin', 'cm-accounts', 'accounts'] },
   // Credit-card booking log — replaces the OTP Google Form + Excel. An
   // accounts screen: the unbilled queue + the full card-spend log. (Bookers
   // will log card payments from inside the booking flow in a later step.)
   // Portal-only; no FinBook. Grant a desk via viewPerms if they adopt it.
-  { key: 'card-log',            label: 'Card Bookings',       roles: ['owner', 'admin', 'cm-accounts', 'accounts'] },
+  { key: 'card-log',            label: 'Card Bookings',       group: 'Bookkeeping (FinBook)', roles: ['owner', 'admin', 'cm-accounts', 'accounts'] },
   // Vendor-payment requests — replaces the vendor Google Form + Excel. An
   // accounts/ops screen: raise a request → manager approves → pay → bill.
   // Portal-only; no FinBook. Approving is manager-gated server-side.
-  { key: 'vendor-pay',          label: 'Vendor Payments',     roles: ['owner', 'admin', 'cm-accounts', 'accounts'] },
+  { key: 'vendor-pay',          label: 'Vendor Payments',     group: 'Bookkeeping (FinBook)', roles: ['owner', 'admin', 'cm-accounts', 'accounts'] },
   // Vendor master admin — the one searchable supplier list behind every vendor
   // picker (bookings, vendor payments). Search/add/edit/deactivate. Portal-only.
-  { key: 'vendors',             label: 'Vendors',             roles: ['owner', 'admin', 'cm-accounts', 'accounts'] },
+  { key: 'vendors',             label: 'Vendors',             group: 'Bookkeeping (FinBook)', roles: ['owner', 'admin', 'cm-accounts', 'accounts'] },
   // Reconciliation status board — replaces the bank-reco + airline-reco
   // Excels. Mark each account reconciled for its period; managers add the
   // accounts. Portal-only; no FinBook.
-  { key: 'reco',                label: 'Reconciliation',      roles: ['owner', 'admin', 'cm-accounts', 'accounts'] },
+  { key: 'reco',                label: 'Reconciliation',      group: 'Bookkeeping (FinBook)', roles: ['owner', 'admin', 'cm-accounts', 'accounts'] },
   // Auto-billing console (Phase 3) — turn a ticketed booking into a FinBook
   // sales bill. Dry-run by default (simulated, nothing posted); the FinBook
   // chokepoint enforces the mode. Accounts + oversight.
-  { key: 'billing',             label: 'Billing',             roles: ['owner', 'admin', 'cm-accounts', 'accounts'] },
+  { key: 'billing',             label: 'Billing',             group: 'Bookkeeping (FinBook)', roles: ['owner', 'admin', 'cm-accounts', 'accounts'] },
   // Forms/Queries module — replaces the loose Google Forms (Courier, Petrol…).
   // 'query-fill' is broad: anyone may file a query (the form's own fillRoles
   // narrow it further). 'queries' is the accounts response desk where they
   // classify + (dry-run) push. Owner edits the form registry from there.
-  { key: 'query-fill',          label: 'Fill a Query',        roles: [...ROLE_SLUGS] },
-  { key: 'queries',             label: 'Queries',             roles: ['owner', 'admin', 'cm-accounts', 'accounts'] },
+  { key: 'query-fill',          label: 'Fill a Query',        group: 'Forms & Queries',       roles: [...ROLE_SLUGS] },
+  { key: 'queries',             label: 'Queries',             group: 'Forms & Queries',       roles: ['owner', 'admin', 'cm-accounts', 'accounts'] },
   // HR module.
-  { key: 'attendance',          label: 'Attendance',          roles: ['owner', 'admin', 'hr'] },
-  { key: 'employees',           label: 'Employees',           roles: ['owner', 'admin', 'hr'] },
-  { key: 'payroll',             label: 'Payroll',             roles: ['owner', 'admin', 'hr'] },
-  { key: 'overtime',            label: 'Overtime',            roles: ['owner', 'admin', 'hr'] },
-  { key: 'offsite',             label: 'Offsite Attendance',  roles: ['owner', 'admin', 'hr'] },
+  { key: 'attendance',          label: 'Attendance',          group: 'HR & Payroll',          roles: ['owner', 'admin', 'hr'] },
+  { key: 'employees',           label: 'Employees',           group: 'HR & Payroll',          roles: ['owner', 'admin', 'hr'] },
+  { key: 'payroll',             label: 'Payroll',             group: 'HR & Payroll',          roles: ['owner', 'admin', 'hr'] },
+  { key: 'overtime',            label: 'Overtime',            group: 'HR & Payroll',          roles: ['owner', 'admin', 'hr'] },
+  { key: 'offsite',             label: 'Offsite Attendance',  group: 'HR & Payroll',          roles: ['owner', 'admin', 'hr'] },
   // HR records leave on behalf of staff who can't file it themselves
   // (support / field people). Same engine as self-service 'leave'.
-  { key: 'leave-admin',         label: 'Record Leave',        roles: ['owner', 'admin', 'hr'] },
+  { key: 'leave-admin',         label: 'Record Leave',        group: 'HR & Payroll',          roles: ['owner', 'admin', 'hr'] },
   // Governance / settings.
-  { key: 'users-auth',          label: 'Users & Authorities', roles: ['owner'] },
-  { key: 'bulk-cm',             label: 'Bulk CM Assignment',  roles: ['owner', 'admin'] },
-  { key: 'audit',               label: 'Audit Log',           roles: ['owner'] },
-  { key: 'activity',            label: 'Activity & Time',     roles: ['owner', 'admin'] },
-  { key: 'settings',            label: 'Settings',            roles: ['owner', 'admin'] },
+  { key: 'users-auth',          label: 'Users & Authorities', group: 'Governance & Settings', roles: ['owner'] },
+  { key: 'bulk-cm',             label: 'Bulk CM Assignment',  group: 'Governance & Settings', roles: ['owner', 'admin'] },
+  { key: 'audit',               label: 'Audit Log',           group: 'Governance & Settings', roles: ['owner'] },
+  { key: 'activity',            label: 'Activity & Time',     group: 'Governance & Settings', roles: ['owner', 'admin'] },
+  { key: 'settings',            label: 'Settings',            group: 'Governance & Settings', roles: ['owner', 'admin'] },
+];
+
+// Department / module groups, in the order they appear as sub-headings in
+// the Users & Authorities permission grid. lib/views.ts owns this order so
+// the grid (and any other grouped surface) stays consistent. This is
+// PRESENTATION-ONLY — it has no bearing on access; it only organises the
+// per-user toggles so each department's permissions sit under one heading.
+export const VIEW_GROUPS: string[] = [
+  'Personal',
+  'Command Center',
+  'Accounts & Followup',
+  'Domestic Reservations',
+  'Packages & Visa',
+  'Marketing & Leads',
+  'Bookkeeping (FinBook)',
+  'Forms & Queries',
+  'HR & Payroll',
+  'Governance & Settings',
 ];
 
 export const VIEW_KEYS = VIEWS.map(v => v.key);

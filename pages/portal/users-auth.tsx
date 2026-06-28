@@ -2,21 +2,26 @@
 // /portal/users-auth — owner-only roster + permissions editor.
 // ============================================================
 // Table view (no per-row dropdowns). Each row shows name, exec
-// ID, role pill, scoreboard toggle, visible-views count, and
+// ID, role pill, security chips, visible-views count, and
 // EDIT / DEACTIVATE actions. Top-right ADD USER button opens
-// the same modal in create mode.
+// the same modal in create mode. The "appears on scoreboard"
+// toggle lives only in the Edit modal (Flags) — it used to be
+// duplicated as a roster column, which was redundant.
 //
 // The Edit modal is full-featured: name, role, password reset,
-// scoreboard, and a 15-view permissions grid where each view has
-// "Visible" + "View-only" checkboxes.
+// scoreboard, a permissions grid grouped by department (each view has
+// "Visible" + "View-only"), and a per-employee picker for which Query
+// forms the person may fill — so everything an employee can see, edit,
+// and submit is controlled from this one screen.
 // ============================================================
 import { useEffect, useMemo, useState } from 'react';
 import { AppShell } from '../../components/AppShell';
 import { useConfirm } from '../../components/ConfirmProvider';
 import { fmtRelative, fmtDateTime } from '../../lib/fmt';
 import { ROLES, ROLE_SLUGS, roleLabel, type RoleSlug } from '../../lib/roles';
-import { VIEWS, canAccessView, canEditView } from '../../lib/views';
+import { VIEWS, VIEW_GROUPS, canAccessView, canEditView } from '../../lib/views';
 import { applyRoleDefaults } from '../../lib/roledefaults';
+import { canFillForm } from '../../lib/queries';
 
 type Role = RoleSlug;
 
@@ -28,6 +33,7 @@ type User = {
   scoreboard: boolean;
   viewPerms: string[] | null;
   viewReadOnly: string[] | null;
+  formPerms: string[] | null;
   totpEnrolledAt: string | null;
   mfaRequired: boolean;
   failedAttempts: number;
@@ -41,6 +47,10 @@ type User = {
 function isLocked(u: User): boolean {
   return !!u.lockedUntil && new Date(u.lockedUntil) > new Date();
 }
+
+// The Query forms the owner can grant per employee. Loaded from the registry
+// (owner-only manage mode) so the Edit modal can show one toggle per form.
+type FormLite = { key: string; title: string; active: boolean; fillRoles: string[] | null; fillDepts: string[] | null };
 
 // View catalog now lives in lib/views.ts — the single source of truth
 // shared with the server-side access gate (canAccessView / requireView)
@@ -84,6 +94,9 @@ export default function UsersAuthPage() {
   const [tab, setTab] = useState<'roster' | 'matrix' | 'role-defaults' | 'deactivated'>('roster');
   // Live, owner-editable per-role default views (from /api/role-defaults).
   const [roleDefaults, setRoleDefaults] = useState<Record<string, string[]> | null>(null);
+  // The query-form registry — so the Edit modal can offer a per-employee
+  // "which forms can this person fill" picker.
+  const [forms, setForms] = useState<FormLite[]>([]);
   const confirm = useConfirm();
 
   function load() {
@@ -108,7 +121,15 @@ export default function UsersAuthPage() {
       })
       .catch(() => {});
   }
-  useEffect(() => { load(); loadRoleDefaults(); }, []);
+  function loadForms() {
+    // Owner-only "manage" mode returns every form (active + inactive). We only
+    // offer the active ones as fill grants, but load all so the list is stable.
+    return fetch('/api/queries/forms?mode=manage')
+      .then(r => r.json())
+      .then(r => { if (r?.ok && Array.isArray(r.forms)) setForms(r.forms); })
+      .catch(() => {});
+  }
+  useEffect(() => { load(); loadRoleDefaults(); loadForms(); }, []);
 
   // Fire-and-reload a single-field PATCH for imperative security actions.
   async function patchUser(id: string, patch: Record<string, any>) {
@@ -167,16 +188,6 @@ export default function UsersAuthPage() {
       load();
     } catch (e: any) { setError(e.message); }
   }
-  async function toggleScoreboard(u: User, value: boolean) {
-    try {
-      const r = await fetch('/api/users', {
-        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ updates: [{ id: u.id, scoreboard: value }] }),
-      }).then(x => x.json());
-      if (!r?.ok) throw new Error(r?.error || 'Failed');
-      load();
-    } catch (e: any) { setError(e.message); }
-  }
 
   if (error && !users) return <AppShell title="Users & Authorities" crumb="Roster + Permissions"><div style={{ padding: 16, color: 'var(--rust)' }}>Failed: {error}</div></AppShell>;
   if (!users) return <AppShell title="Users & Authorities" crumb="Roster + Permissions"><div style={{ padding: 32, color: 'var(--t-3)' }}>Loading…</div></AppShell>;
@@ -230,7 +241,6 @@ export default function UsersAuthPage() {
               <Th>Executive ID</Th>
               <Th>Role</Th>
               <Th align="center">Security</Th>
-              <Th align="center">Scoreboard</Th>
               <Th align="center">Visible Views</Th>
               <Th align="right">Actions</Th>
             </tr>
@@ -265,9 +275,6 @@ export default function UsersAuthPage() {
                       {u.mustChangePassword && <SecChip tone="gold">Pwd reset</SecChip>}
                       {!locked && !u.totpEnrolledAt && !u.mfaRequired && !u.mustChangePassword && <span style={{ color: 'var(--t-3)', fontSize: 12 }}>—</span>}
                     </div>
-                  </Td>
-                  <Td align="center">
-                    <Toggle on={u.scoreboard} onChange={v => toggleScoreboard(u, v)} disabled={!u.active} />
                   </Td>
                   <Td align="center">
                     <span style={{ fontFamily: "inherit", fontSize: 13, color: 'var(--t-2)' }}>
@@ -362,6 +369,7 @@ export default function UsersAuthPage() {
           mode={editTarget === 'new' ? 'create' : 'edit'}
           user={editTarget === 'new' ? null : editTarget}
           roleDefaults={roleDefaults}
+          forms={forms}
           onClose={() => setEditTarget(null)}
           onSaved={() => { setEditTarget(null); load(); }}
           onUnlock={unlockUser}
@@ -374,11 +382,12 @@ export default function UsersAuthPage() {
 
 // ─── User edit / create modal ────────────────────────────────
 function UserEditModal({
-  mode, user, roleDefaults, onClose, onSaved, onUnlock, onResetMfa,
+  mode, user, roleDefaults, forms, onClose, onSaved, onUnlock, onResetMfa,
 }: {
   mode: 'edit' | 'create';
   user: User | null;
   roleDefaults: Record<string, string[]> | null;
+  forms: FormLite[];
   onClose: () => void;
   onSaved: () => void;
   onUnlock: (u: User) => void;
@@ -403,8 +412,15 @@ function UserEditModal({
 
   const [visible, setVisible] = useState<Set<string>>(initialVisible);
   const [readonly, setReadonly] = useState<Set<string>>(initialReadonly);
+  // Per-employee form-fill grants (QueryForm keys). Empty = inherit the role
+  // default; a non-empty set is the exact list of forms this person may fill.
+  const [formPerms, setFormPerms] = useState<Set<string>>(new Set(user?.formPerms || []));
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
+  function toggleForm(key: string) {
+    setFormPerms(prev => { const next = new Set(prev); next.has(key) ? next.delete(key) : next.add(key); return next; });
+  }
 
   function toggleVisible(key: string) {
     setVisible(prev => {
@@ -426,6 +442,17 @@ function UserEditModal({
   }
   function setAll() { setVisible(new Set(VIEWS.map(v => v.key))); }
   function setNone() { setVisible(new Set()); setReadonly(new Set()); }
+  // Per-department quick toggles — grant / revoke a whole module's views at
+  // once (e.g. "give this user everything in HR"). Only touch the keys in
+  // that group; the rest of the grid is left exactly as the owner set it.
+  function setGroupVisible(keys: string[], on: boolean) {
+    setVisible(prev => {
+      const next = new Set(prev);
+      keys.forEach(k => (on ? next.add(k) : next.delete(k)));
+      return next;
+    });
+    if (!on) setReadonly(prev => { const next = new Set(prev); keys.forEach(k => next.delete(k)); return next; });
+  }
   function setRoleDefault() {
     // Prefer the LIVE, owner-edited role defaults; fall back to the
     // hard-coded VIEWS defaults if they haven't loaded yet.
@@ -442,13 +469,14 @@ function UserEditModal({
     try {
       const viewPerms = Array.from(visible);
       const viewReadOnly = Array.from(readonly);
+      const formPermsArr = Array.from(formPerms);
 
       if (mode === 'create') {
         const r = await fetch('/api/users', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             name, execId, role, password,
-            scoreboard, viewPerms, viewReadOnly,
+            scoreboard, viewPerms, viewReadOnly, formPerms: formPermsArr,
             mfaRequired, mustChangePassword: forceChange,
           }),
         }).then(x => x.json());
@@ -457,7 +485,7 @@ function UserEditModal({
         const update: any = {
           id: user!.id,
           name, role, scoreboard,
-          viewPerms, viewReadOnly,
+          viewPerms, viewReadOnly, formPerms: formPermsArr,
           mfaRequired,
         };
         // Only send mustChangePassword if it actually changed — a
@@ -633,44 +661,129 @@ function UserEditModal({
             Tick <strong>Visible</strong> to show the sheet in the sidebar. Tick <strong>View-only</strong> if the user should see it but not edit anything within it.
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-            {VIEWS.map(v => {
-              const isVisible = visible.has(v.key);
-              const isReadOnly = readonly.has(v.key);
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+            {(() => {
+              // Render under department sub-headings in the canonical order,
+              // then any view whose group somehow isn't listed (future-proofing
+              // — a view must never silently vanish from the owner's control).
+              const order = [...VIEW_GROUPS];
+              for (const v of VIEWS) if (!order.includes(v.group)) order.push(v.group);
+              return order;
+            })().map(group => {
+              const groupViews = VIEWS.filter(v => v.group === group);
+              if (groupViews.length === 0) return null;
+              const groupKeys = groupViews.map(v => v.key);
+              const visCount = groupViews.filter(v => visible.has(v.key)).length;
               return (
-                <div key={v.key} style={{
-                  display: 'flex', gap: 6, alignItems: 'stretch',
-                }}>
-                  <button onClick={() => toggleVisible(v.key)} style={{
-                    flex: 1, textAlign: 'left',
-                    padding: '8px 10px', borderRadius: 6,
-                    background: isVisible ? 'rgba(15,40,85,.06)' : 'var(--bg-2, #f6f8fb)',
-                    border: `1px solid ${isVisible ? 'var(--navy)' : 'var(--line, #e7eaf0)'}`,
-                    cursor: 'pointer',
-                    display: 'flex', alignItems: 'center', gap: 8,
-                    fontSize: 12, color: 'var(--navy-deep)',
+                <div key={group}>
+                  {/* Department sub-heading: name · how many of its views are visible · quick All / None */}
+                  <div style={{
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                    marginBottom: 9, paddingBottom: 5, borderBottom: '1px solid var(--line, #e7eaf0)',
                   }}>
-                    <input type="checkbox" checked={isVisible} readOnly tabIndex={-1}
-                      style={{ accentColor: '#0F2855', width: 14, height: 14 }} />
-                    <span>{v.label}</span>
-                  </button>
-                  <button onClick={() => isVisible && toggleReadonly(v.key)} disabled={!isVisible} style={{
-                    minWidth: 96, padding: '8px 10px', borderRadius: 6,
-                    background: isReadOnly ? 'rgba(15,40,85,.06)' : 'var(--bg-2, #f6f8fb)',
-                    border: `1px solid ${isReadOnly ? 'var(--navy)' : 'var(--line, #e7eaf0)'}`,
-                    cursor: isVisible ? 'pointer' : 'not-allowed',
-                    opacity: isVisible ? 1 : 0.4,
-                    display: 'flex', alignItems: 'center', gap: 6,
-                    fontSize: 11, color: 'var(--t-2)',
-                  }}>
-                    <input type="checkbox" checked={isReadOnly} readOnly tabIndex={-1}
-                      style={{ accentColor: '#0F2855', width: 12, height: 12 }} />
-                    <span>View-only</span>
-                  </button>
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                      <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.12em', textTransform: 'uppercase', color: 'var(--navy-deep)' }}>{group}</span>
+                      <span style={{ fontSize: 10.5, color: 'var(--t-3)', fontVariantNumeric: 'tabular-nums' }}>{visCount}/{groupViews.length}</span>
+                    </div>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <button type="button" onClick={() => setGroupVisible(groupKeys, true)} style={{
+                        border: '1px solid var(--line, #e7eaf0)', background: 'transparent', color: 'var(--t-2)',
+                        borderRadius: 5, padding: '2px 9px', fontSize: 10, fontWeight: 700, letterSpacing: '.06em', cursor: 'pointer',
+                      }}>ALL</button>
+                      <button type="button" onClick={() => setGroupVisible(groupKeys, false)} style={{
+                        border: '1px solid var(--line, #e7eaf0)', background: 'transparent', color: 'var(--t-2)',
+                        borderRadius: 5, padding: '2px 9px', fontSize: 10, fontWeight: 700, letterSpacing: '.06em', cursor: 'pointer',
+                      }}>NONE</button>
+                    </div>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                    {groupViews.map(v => {
+                      const isVisible = visible.has(v.key);
+                      const isReadOnly = readonly.has(v.key);
+                      return (
+                        <div key={v.key} style={{
+                          display: 'flex', gap: 6, alignItems: 'stretch',
+                        }}>
+                          <button onClick={() => toggleVisible(v.key)} style={{
+                            flex: 1, textAlign: 'left',
+                            padding: '8px 10px', borderRadius: 6,
+                            background: isVisible ? 'rgba(15,40,85,.06)' : 'var(--bg-2, #f6f8fb)',
+                            border: `1px solid ${isVisible ? 'var(--navy)' : 'var(--line, #e7eaf0)'}`,
+                            cursor: 'pointer',
+                            display: 'flex', alignItems: 'center', gap: 8,
+                            fontSize: 12, color: 'var(--navy-deep)',
+                          }}>
+                            <input type="checkbox" checked={isVisible} readOnly tabIndex={-1}
+                              style={{ accentColor: '#0F2855', width: 14, height: 14 }} />
+                            <span>{v.label}</span>
+                          </button>
+                          <button onClick={() => isVisible && toggleReadonly(v.key)} disabled={!isVisible} style={{
+                            minWidth: 96, padding: '8px 10px', borderRadius: 6,
+                            background: isReadOnly ? 'rgba(15,40,85,.06)' : 'var(--bg-2, #f6f8fb)',
+                            border: `1px solid ${isReadOnly ? 'var(--navy)' : 'var(--line, #e7eaf0)'}`,
+                            cursor: isVisible ? 'pointer' : 'not-allowed',
+                            opacity: isVisible ? 1 : 0.4,
+                            display: 'flex', alignItems: 'center', gap: 6,
+                            fontSize: 11, color: 'var(--t-2)',
+                          }}>
+                            <input type="checkbox" checked={isReadOnly} readOnly tabIndex={-1}
+                              style={{ accentColor: '#0F2855', width: 12, height: 12 }} />
+                            <span>View-only</span>
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               );
             })}
           </div>
+
+          <hr style={{ border: 'none', borderTop: '1px solid var(--line, #e7eaf0)', margin: '22px 0 18px' }} />
+
+          {/* Per-employee form-fill grants — which Query forms this person may FILL */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+            <SectionLabel>Forms this user can fill</SectionLabel>
+            {!(role === 'owner' || role === 'admin') && (
+              <div style={{ display: 'flex', gap: 6 }}>
+                <PermBtn onClick={() => setFormPerms(new Set())}>ROLE DEFAULT</PermBtn>
+              </div>
+            )}
+          </div>
+
+          {(role === 'owner' || role === 'admin') ? (
+            <div style={{ fontSize: 11.5, color: 'var(--t-3)', lineHeight: 1.5, background: 'var(--bg-2, #f6f8fb)', borderRadius: 8, padding: '10px 12px' }}>
+              {roleLabel(role)}s can fill every query form — per-form control doesn’t apply to this role.
+            </div>
+          ) : forms.filter(f => f.active).length === 0 ? (
+            <div style={{ fontSize: 11.5, color: 'var(--t-3)' }}>No query forms have been created yet.</div>
+          ) : (
+            <>
+              <div style={{ fontSize: 11, color: 'var(--t-3)', marginBottom: 12, lineHeight: 1.5 }}>
+                Leave all unticked to use the <strong>role default</strong>. Tick any form to set the <strong>exact</strong> list this person may fill in “Fill a Query” — an explicit list replaces the role default.
+                {formPerms.size === 0 && (
+                  <> Currently inheriting: {forms.filter(f => f.active && canFillForm({ role }, f)).map(f => f.title).join(', ') || 'no forms'}.</>
+                )}
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                {forms.filter(f => f.active).map(f => {
+                  const on = formPerms.has(f.key);
+                  return (
+                    <button key={f.key} onClick={() => toggleForm(f.key)} style={{
+                      textAlign: 'left', padding: '8px 10px', borderRadius: 6,
+                      background: on ? 'rgba(15,40,85,.06)' : 'var(--bg-2, #f6f8fb)',
+                      border: `1px solid ${on ? 'var(--navy)' : 'var(--line, #e7eaf0)'}`,
+                      cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8,
+                      fontSize: 12, color: 'var(--navy-deep)',
+                    }}>
+                      <input type="checkbox" checked={on} readOnly tabIndex={-1} style={{ accentColor: '#0F2855', width: 14, height: 14 }} />
+                      <span>{f.title}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </>
+          )}
 
           {err && <div style={{ color: 'var(--rust)', fontSize: 12, marginTop: 14 }}>{err}</div>}
         </div>

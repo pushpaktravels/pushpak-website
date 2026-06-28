@@ -287,6 +287,7 @@ function EmployeesInner() {
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
             <thead>
               <tr style={{ background: 'rgba(15,40,85,0.04)', textAlign: 'left', verticalAlign: 'top' }}>
+                <th style={{ ...th, width: 40 }}>#</th>
                 <th style={th}>Name
                   <input style={filterInp} value={filters.name} onChange={e => setFilter('name', e.target.value)} placeholder="filter…" />
                 </th>
@@ -341,12 +342,13 @@ function EmployeesInner() {
             </thead>
             <tbody>
               {visible.length === 0 ? (
-                <tr><td style={{ ...td, color: 'var(--ink-soft)' }} colSpan={11}>No employees match.</td></tr>
-              ) : visible.map(e => {
+                <tr><td style={{ ...td, color: 'var(--ink-soft)' }} colSpan={12}>No employees match.</td></tr>
+              ) : visible.map((e, idx) => {
                 const stub = e.hrCode.startsWith('BIO-');
                 const noSalary = Number(e.monthlySalary) === 0;
                 return (
                   <tr key={e.id} style={{ borderTop: '1px solid rgba(15,40,85,0.06)', opacity: e.active ? 1 : 0.6 }}>
+                    <td style={{ ...td, color: 'var(--ink-soft)', fontVariantNumeric: 'tabular-nums' }}>{idx + 1}</td>
                     <td style={td}>
                       {e.name}
                       {(stub || noSalary) && <span style={pill('rust')}>needs details</span>}
@@ -360,16 +362,14 @@ function EmployeesInner() {
                       <select
                         value={e.weeklyOffDay}
                         onChange={ev => setWeeklyOff(e, Number(ev.target.value))}
-                        title={e.weeklyOffSet ? 'Weekly off day' : 'Not confirmed yet — pick the real weekly-off day'}
+                        title="Weekly off day"
                         style={{
                           padding: '4px 6px', borderRadius: 6, fontSize: 12.5, color: 'var(--ink)', cursor: 'pointer',
-                          border: `1px solid ${e.weeklyOffSet ? 'rgba(15,40,85,0.2)' : 'rgba(201,164,114,0.75)'}`,
-                          background: e.weeklyOffSet ? '#fff' : 'rgba(201,164,114,0.1)',
+                          border: '1px solid rgba(15,40,85,0.2)', background: '#fff',
                         }}
                       >
                         {DAYS.map((d, i) => <option key={i} value={i}>{d}</option>)}
                       </select>
-                      {!e.weeklyOffSet && <span style={pill('gold')}>set day?</span>}
                     </td>
                     <td style={{ ...td, whiteSpace: 'nowrap' }}>
                       <select

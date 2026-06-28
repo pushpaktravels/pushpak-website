@@ -34,6 +34,11 @@ model User {
   // Per-user override of which views they can see/edit (overrides role default)
   viewPerms      String[]  @default([])
   viewReadOnly   String[]  @default([])
+  // Per-user override of which Query forms this person may FILL. Authoritative
+  // like viewPerms: a non-empty list REPLACES the form's role/department gate
+  // for this user (owner can widen OR narrow one person); empty = inherit the
+  // role default, so existing users are unaffected. Holds QueryForm.key slugs.
+  formPerms      String[]  @default([])
   // 2FA (TOTP)
   totpSecret     String? // base32 encoded; null if 2FA not enrolled yet
   totpEnrolledAt DateTime?
