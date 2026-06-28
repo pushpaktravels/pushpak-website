@@ -10,6 +10,17 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { query, queryOne } from '@/lib/pg';
 import { requireAuth } from '@/lib/auth';
+import { financialYearOf } from '@/lib/attendance-db';
+
+// Normalise a pg DATE (Date or string) to "YYYY-MM-DD".
+function isoDate(v: any): string | null {
+  if (!v) return null;
+  if (v instanceof Date) {
+    const p = (n: number) => String(n).padStart(2, '0');
+    return `${v.getUTCFullYear()}-${p(v.getUTCMonth() + 1)}-${p(v.getUTCDate())}`;
+  }
+  return String(v).slice(0, 10);
+}
 
 function todayIST(): string {
   const d = new Date();
@@ -83,6 +94,26 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     ? Math.round((Number(activity?.month_active_days || 0) / businessDays) * 100)
     : 0;
 
+  // ── Employee-linked HR data (real, when the login is tied to an Employee) ──
+  // dob for the identity card; leave balance from the SAME LeaveBalance row the
+  // My Leave page and the HR leave desk read, so the number is identical
+  // everywhere in the portal.
+  const emp = await queryOne<any>(
+    `SELECT id, dob FROM "Employee" WHERE "loginExecId" = $1 AND active = TRUE`,
+    [user.execId],
+  );
+  const leaveBal = emp
+    ? await queryOne<any>(
+        `SELECT opening, used, remaining FROM "LeaveBalance"
+          WHERE "employeeId" = $1 AND "financialYear" = $2`,
+        [emp.id, financialYearOf(new Date())],
+      )
+    : null;
+  // No FY row yet = nothing drawn this year: full 18 still available.
+  const leavesTotal = leaveBal ? Number(leaveBal.opening) : 18;
+  const leavesUsed = emp ? (leaveBal ? Number(leaveBal.used) : 0) : null;
+  const leavesRemaining = emp ? (leaveBal ? Number(leaveBal.remaining) : leavesTotal) : null;
+
   return res.json({
     ok: true,
     profile: {
@@ -90,6 +121,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       execId: user.execId,
       role:   user.role,
       email:  (user as any).email || null,
+      dob:    isoDate(emp?.dob),
       lastLoginAt: user.lastLoginAt,
     },
     activity: {
@@ -108,16 +140,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       monthEvents: Number(points?.month_events || 0),
       monthActions: Number(actions?.month_count || 0),
     },
-    // HR fields — placeholders until the HR system lands.
-    // The UI renders these with a "pending integration" treatment.
+    // HR fields. Leave balance is LIVE (LeaveBalance table); advances /
+    // installments remain pending until that side of HR is wired.
     hr: {
-      placeholder: true,
-      leavesTotal: 18,
-      leavesUsed: null,
-      leavesRemaining: null,
-      presentDaysThisMonth: null,
-      absentDaysThisMonth: null,
-      paidLeavesThisMonth: null,
+      linked: !!emp,
+      leavesTotal,
+      leavesUsed,
+      leavesRemaining,
       advanceBalance: null,
       activeInstalments: null,
     },

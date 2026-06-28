@@ -18,13 +18,11 @@ import MyAttendancePanel from '../../components/MyAttendancePanel';
 
 type Data = {
   ok: true;
-  profile: { name: string; execId: string; role: string; email: string | null; lastLoginAt: string | null };
+  profile: { name: string; execId: string; role: string; email: string | null; dob: string | null; lastLoginAt: string | null };
   activity: { todaySec: number; weekSec: number; monthSec: number; consistencyPct: number; monthActiveDays: number; businessDays: number };
   hr: {
-    placeholder: true;
+    linked: boolean;
     leavesTotal: number; leavesUsed: number | null; leavesRemaining: number | null;
-    presentDaysThisMonth: number | null; absentDaysThisMonth: number | null;
-    paidLeavesThisMonth: number | null;
     advanceBalance: number | null; activeInstalments: number | null;
   };
 };
@@ -36,6 +34,13 @@ function fmtHM(sec: number): string {
   if (h === 0) return `${m}m`;
   if (m === 0) return `${h}h`;
   return `${h}h ${m}m`;
+}
+
+function fmtDob(iso: string): string {
+  // iso = "YYYY-MM-DD"; render as "12 Aug 1990" without TZ drift.
+  const [y, m, d] = iso.slice(0, 10).split('-').map(Number);
+  if (!y || !m || !d) return iso;
+  return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC' });
 }
 
 export default function ProfilePage() {
@@ -80,6 +85,7 @@ export default function ProfilePage() {
               <span><b style={{ color: '#fff' }}>{p.execId}</b></span>
               <span>Role: <b style={{ color: '#fff' }}>{p.role}</b></span>
               {p.email && <span>Email: <b style={{ color: '#fff' }}>{p.email}</b></span>}
+              <span>DOB: <b style={{ color: '#fff' }}>{p.dob ? fmtDob(p.dob) : '—'}</b></span>
             </div>
             {p.lastLoginAt && (
               <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.55)', marginTop: 8 }}>
@@ -106,14 +112,17 @@ export default function ProfilePage() {
             <KV label="Consistency"         value={`${data.activity.consistencyPct}%`} real accent={data.activity.consistencyPct >= 80 ? 'sage' : data.activity.consistencyPct >= 60 ? 'amber' : 'rust'} />
           </Section>
 
-          {/* Leave balance */}
-          <Section title="Leave balance" pendingHR>
+          {/* Leave balance — live from the LeaveBalance ledger (same number the
+              My Leave page and HR desk show). */}
+          <Section title="Leave balance">
             <KV label="Annual entitlement" value={`${hr.leavesTotal} days`} real />
-            <KV label="Used this year"     value={hr.leavesUsed} />
-            <KV label="Remaining"          value={hr.leavesRemaining} accent="sage" />
+            <KV label="Used this year"     value={hr.leavesUsed != null ? `${hr.leavesUsed} days` : null} real />
+            <KV label="Remaining"          value={hr.leavesRemaining != null ? `${hr.leavesRemaining} days` : null} accent="sage" real />
             <Hr />
-            <div style={{ fontSize: 12, color: 'var(--ink-soft)', lineHeight: 1.5, fontStyle: 'italic', marginTop: 8 }}>
-              Leave history table appears here once HR is integrated. You'll be able to request leaves, see approval status, and view past records.
+            <div style={{ fontSize: 12, color: 'var(--ink-soft)', lineHeight: 1.5, marginTop: 8 }}>
+              {hr.linked
+                ? <>To apply for a leave or see your full leave history, open <a href="/portal/leave" style={{ color: 'var(--navy-deep, #1A3F7E)', fontWeight: 600 }}>My Leave</a>.</>
+                : <span style={{ fontStyle: 'italic' }}>Your login isn’t linked to an employee record yet, so no leave balance is tracked. Ask the owner to link it.</span>}
             </div>
           </Section>
         </div>
@@ -139,16 +148,143 @@ export default function ProfilePage() {
           </Section>
         </div>
 
-        {/* Documents */}
-        <Section title="Documents" pendingHR>
-          <div style={{ fontSize: 13, color: 'var(--ink-soft)', lineHeight: 1.6 }}>
-            Once the HR system is live this section will hold your offer letter, ID card, salary slips,
-            and any other documents shared by HR. You'll also be able to upload personal documents
-            (ID proof, address proof, bank passbook) for HR records.
-          </div>
+        {/* Documents — live: the employee uploads their own ID papers. */}
+        <Section title="My documents">
+          <MyDocuments />
         </Section>
       </div>
     </AppShell>
+  );
+}
+
+// ── Personal documents (Aadhaar / PAN / …) — self-service upload locker ──
+type DocMeta = { id: string; kind: string | null; fileName: string; mimeType: string; size: number; createdAt: string };
+
+const DOC_KINDS: { value: string; label: string }[] = [
+  { value: 'aadhaar', label: 'Aadhaar card' },
+  { value: 'pan', label: 'PAN card' },
+  { value: 'bank-passbook', label: 'Bank passbook' },
+  { value: 'address-proof', label: 'Address proof' },
+  { value: 'photo', label: 'Photograph' },
+  { value: 'other', label: 'Other' },
+];
+const kindLabel = (k: string | null) => DOC_KINDS.find(d => d.value === k)?.label || 'Other';
+
+function fmtBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function MyDocuments() {
+  const [linked, setLinked] = useState<boolean | null>(null);
+  const [files, setFiles] = useState<DocMeta[]>([]);
+  const [kind, setKind] = useState('aadhaar');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function refresh() {
+    try {
+      const r = await fetch('/api/me/documents').then(x => x.json());
+      if (!r?.ok) throw new Error(r?.error || 'Failed to load');
+      setLinked(r.linked !== false);
+      setFiles(r.files || []);
+    } catch (e: any) { setError(e.message); }
+  }
+  useEffect(() => { refresh(); }, []);
+
+  async function onPick(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // allow re-picking the same file
+    if (!file) return;
+    setBusy(true); setError(null);
+    try {
+      const fd = new FormData();
+      fd.append('kind', kind);
+      fd.append('file', file);
+      const r = await fetch('/api/me/documents', { method: 'POST', body: fd }).then(x => x.json());
+      if (!r?.ok) throw new Error(r?.error || 'Upload failed');
+      await refresh();
+    } catch (e: any) { setError(e.message); }
+    finally { setBusy(false); }
+  }
+
+  async function onDelete(id: string) {
+    if (!confirm('Remove this document?')) return;
+    setBusy(true); setError(null);
+    try {
+      const r = await fetch(`/api/me/documents/${id}`, { method: 'DELETE' }).then(x => x.json());
+      if (!r?.ok) throw new Error(r?.error || 'Delete failed');
+      await refresh();
+    } catch (e: any) { setError(e.message); }
+    finally { setBusy(false); }
+  }
+
+  if (linked === false) {
+    return (
+      <div style={{ fontSize: 13, color: 'var(--ink-soft)', lineHeight: 1.6 }}>
+        Your login isn’t linked to an employee record yet. Once the owner links it, you’ll be able to upload your documents here.
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div style={{ fontSize: 12.5, color: 'var(--ink-soft)', lineHeight: 1.6, marginBottom: 14 }}>
+        Upload your own ID papers (Aadhaar, PAN, bank passbook, address proof). They’re private to you —
+        only you can see or remove them here. PDF or photo, up to 10&nbsp;MB each.
+      </div>
+
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 16 }}>
+        <select value={kind} onChange={e => setKind(e.target.value)} disabled={busy}
+          style={{ padding: '9px 12px', borderRadius: 8, border: '1px solid rgba(15,40,85,0.22)', background: '#fff', fontSize: 13, color: 'var(--ink)' }}>
+          {DOC_KINDS.map(d => <option key={d.value} value={d.value}>{d.label}</option>)}
+        </select>
+        <label style={{
+          padding: '9px 16px', borderRadius: 8, cursor: busy ? 'default' : 'pointer',
+          background: busy ? 'rgba(15,40,85,0.25)' : 'var(--navy-deep, #1A3F7E)', color: '#fff',
+          fontSize: 13, fontWeight: 600,
+        }}>
+          {busy ? 'Uploading…' : 'Choose file & upload'}
+          <input type="file" accept=".pdf,.jpg,.jpeg,.png,.webp,.heic" onChange={onPick} disabled={busy} style={{ display: 'none' }} />
+        </label>
+      </div>
+
+      {error && <div style={{ fontSize: 12.5, color: 'var(--rust, #B5483D)', marginBottom: 12 }}>{error}</div>}
+
+      {files.length === 0 ? (
+        <div style={{ fontSize: 13, color: 'var(--ink-soft)', fontStyle: 'italic' }}>No documents uploaded yet.</div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {files.map(f => (
+            <div key={f.id} style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+              padding: '10px 14px', borderRadius: 10, border: '1px solid rgba(15,40,85,0.10)', background: 'rgba(255,255,255,0.7)',
+            }}>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>
+                  <span style={{
+                    fontSize: 10, letterSpacing: '.04em', textTransform: 'uppercase', fontWeight: 700,
+                    padding: '2px 7px', borderRadius: 4, marginRight: 8,
+                    background: 'rgba(26,63,126,0.10)', color: 'var(--navy-deep, #1A3F7E)',
+                  }}>{kindLabel(f.kind)}</span>
+                  {f.fileName}
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--ink-soft)', marginTop: 3 }}>
+                  {fmtBytes(f.size)} · {new Date(f.createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+                <a href={`/api/me/documents/${f.id}`} target="_blank" rel="noreferrer"
+                  style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--navy-deep, #1A3F7E)', textDecoration: 'none', padding: '6px 10px' }}>View</a>
+                <button onClick={() => onDelete(f.id)} disabled={busy}
+                  style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--rust, #B5483D)', background: 'none', border: 'none', cursor: 'pointer', padding: '6px 10px' }}>Remove</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 

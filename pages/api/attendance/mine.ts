@@ -10,12 +10,21 @@
 // attendance. Returns { linked:false } when the login isn't yet tied to
 // an employee (the owner links it in the employee master).
 //
+// EVERY day is shown, not only the days with a biometric punch. The raw
+// machine file has a row only when someone physically punched, so leaves,
+// weekly-offs, holidays and plain absences would otherwise silently vanish
+// from the table (the gap the owner spotted: a leave on a no-punch day not
+// appearing). We therefore synthesize the full month calendar at read time:
+// real punch rows where they exist, else the day's true nature derived from
+// the holiday list / weekly-off / approved leave, else ABSENT.
+//
 // ?month=YYYY-MM (defaults to the current month).
 // Auth: any logged-in user.
 // ============================================================
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { query, queryOne } from '@/lib/pg';
 import { requireAuth } from '@/lib/auth';
+import { isoToUtcDate, weekdayOf } from '@/lib/attendance-db';
 
 function monthRange(month: string): { start: string; end: string } {
   // start = first of month, end = first of next month (exclusive)
@@ -25,6 +34,58 @@ function monthRange(month: string): { start: string; end: string } {
   const nm = m === 12 ? 1 : m + 1;
   const end = `${ny}-${String(nm).padStart(2, '0')}-01`;
   return { start, end };
+}
+
+const pad = (n: number) => String(n).padStart(2, '0');
+
+// Normalise a pg DATE (returned as a JS Date or a string) to "YYYY-MM-DD".
+function isoOf(v: any): string {
+  if (v instanceof Date) return `${v.getUTCFullYear()}-${pad(v.getUTCMonth() + 1)}-${pad(v.getUTCDate())}`;
+  return String(v).slice(0, 10);
+}
+
+// Inclusive list of ISO dates from a → b.
+function dateSpan(a: string, b: string): string[] {
+  const out: string[] = [];
+  let d = isoToUtcDate(a);
+  const end = isoToUtcDate(b);
+  while (d <= end) { out.push(isoOf(d)); d = new Date(d.getTime() + 86400000); }
+  return out;
+}
+
+function todayIstIso(): string {
+  const d = new Date();
+  d.setUTCHours(d.getUTCHours() + 5);
+  d.setUTCMinutes(d.getUTCMinutes() + 30);
+  return d.toISOString().slice(0, 10);
+}
+function thisMonthIst(): string {
+  return todayIstIso().slice(0, 7);
+}
+const minIso = (a: string, b: string) => (a < b ? a : b);
+
+// How a standing leave shows on a no-punch day. Partial informed kinds
+// (late / early) need a punch to mean anything, so they're skipped here.
+function leaveDisplay(kind: string | null): { status: string; deduction: number } | null {
+  switch (kind) {
+    case 'FULL_DAY':
+    case 'PAID_FROM_BALANCE': return { status: 'LEAVE', deduction: 0 };
+    case 'LWP':               return { status: 'LEAVE', deduction: 1 }; // unpaid, still a leave day
+    case 'HALF_DAY':          return { status: 'HALF_DAY', deduction: 0.5 };
+    case 'SPECIAL_PAID':      return { status: 'SPECIAL_PAID', deduction: 0 };
+    case 'ON_DUTY':           return { status: 'ON_DUTY', deduction: 0 };
+    default:                  return null;
+  }
+}
+
+// A synthesized (no-punch) day row — same shape the panel renders for real rows.
+function synthDay(date: string, status: string, deduction: number, remark: string | null, informed = false) {
+  return {
+    date, status,
+    actualIn: null, actualOut: null, scheduledIn: null, scheduledOut: null,
+    lateByMin: null, earlyGoingMin: null,
+    isInformed: informed, deductionDays: deduction, remark: remark ?? null,
+  };
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
@@ -38,7 +99,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     : `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
 
   const emp = await queryOne<any>(
-    `SELECT id, name, "hrCode", department, designation, "shiftIn", "shiftOut", "weeklyOffDay"
+    `SELECT id, name, "hrCode", department, designation, "shiftIn", "shiftOut", "weeklyOffDay", "joiningDate"
        FROM "Employee" WHERE "loginExecId" = $1 AND active = TRUE`,
     [user.execId],
   );
@@ -47,7 +108,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   const { start, end } = monthRange(month);
-  const days = await query<any>(
+
+  // Real attendance rows on file (biometric punches + any human/leave overrides).
+  const rows = await query<any>(
     `SELECT date, status, "actualIn", "actualOut", "scheduledIn", "scheduledOut",
             "lateByMin", "earlyGoingMin", "isInformed", "deductionDays", remark
        FROM "DailyAttendance"
@@ -55,9 +118,61 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       ORDER BY date`,
     [emp.id, start, end],
   );
+  const rowByDate = new Map<string, any>();
+  for (const r of rows) { const iso = isoOf(r.date); rowByDate.set(iso, { ...r, date: iso }); }
 
-  // Tally the month. Counts mirror the status taxonomy; deduction is the
-  // pay-day fraction lost (half day = 0.5, absent = 1, etc.).
+  // Approved leaves overlapping the month — so a leave taken on a day the
+  // person never punched (no biometric row) still appears in the table.
+  const leaves = await query<any>(
+    `SELECT "fromDate", "toDate", kind FROM "LeaveRequest"
+      WHERE "employeeId" = $1 AND status = 'APPROVED'
+        AND "fromDate" < $3 AND "toDate" >= $2`,
+    [emp.id, start, end],
+  );
+  const leaveByDate = new Map<string, { status: string; deduction: number }>();
+  for (const lv of leaves) {
+    const eff = leaveDisplay(lv.kind);
+    if (!eff) continue;
+    for (const iso of dateSpan(isoOf(lv.fromDate), isoOf(lv.toDate))) {
+      if (iso < start || iso >= end) continue;
+      leaveByDate.set(iso, eff);
+    }
+  }
+
+  // Holidays this month.
+  const hols = await query<any>(`SELECT date, name FROM "Holiday" WHERE date >= $1 AND date < $2`, [start, end]);
+  const holByDate = new Map<string, string>();
+  for (const h of hols) holByDate.set(isoOf(h.date), h.name);
+
+  // Synthesis window: from the first day we actually KNOW about this month
+  // (first punch row or first approved leave) through today (or month-end for
+  // past months). Starting at first-known avoids inventing "absent" days for
+  // the stretch before attendance tracking began. Never before joiningDate.
+  const known = [...rowByDate.keys(), ...leaveByDate.keys()].sort();
+  const lastOfMonth = isoOf(new Date(isoToUtcDate(end).getTime() - 86400000));
+  const cap = month >= thisMonthIst() ? minIso(todayIstIso(), lastOfMonth) : lastOfMonth;
+  let synthStart = known.length ? known[0] : null;
+  const joiningIso = emp.joiningDate ? isoOf(emp.joiningDate) : null;
+  if (synthStart && joiningIso && joiningIso > synthStart) synthStart = joiningIso;
+
+  const days: any[] = [];
+  if (synthStart && synthStart <= cap) {
+    for (const iso of dateSpan(synthStart, cap)) {
+      const real = rowByDate.get(iso);
+      if (real) { days.push(real); continue; }
+      if (holByDate.has(iso)) { days.push(synthDay(iso, 'HOLIDAY', 0, holByDate.get(iso)!)); continue; }
+      if (weekdayOf(iso) === emp.weeklyOffDay) { days.push(synthDay(iso, 'OFF_DAY', 0, null)); continue; }
+      const lv = leaveByDate.get(iso);
+      if (lv) { days.push(synthDay(iso, lv.status, lv.deduction, null, true)); continue; }
+      days.push(synthDay(iso, 'ABSENT', 1, null)); // a working day with no punch and no leave
+    }
+  } else {
+    for (const r of rowByDate.values()) days.push(r);
+  }
+  days.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+
+  // Tally from the synthesized calendar so leave / off / holiday / absent all
+  // count — this is the same month picture the rest of the portal reads.
   const summary = {
     present: 0, late: 0, halfDay: 0, absent: 0,
     leave: 0, offDay: 0, holiday: 0, onDuty: 0, specialPaid: 0,
