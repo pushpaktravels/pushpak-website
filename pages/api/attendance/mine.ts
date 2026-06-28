@@ -18,6 +18,12 @@
 // real punch rows where they exist, else the day's true nature derived from
 // the holiday list / weekly-off / approved leave, else ABSENT.
 //
+// IMPORTANT — only from RULES_START (see below). Before that date attendance &
+// leave were maintained manually off-portal and already processed, so we never
+// invent days for those months (a manually-taken leave isn't in the portal and
+// must NOT be shown as ABSENT). Pre-RULES_START we show ONLY the real figures
+// on file; full-calendar synthesis begins on RULES_START.
+//
 // ?month=YYYY-MM (defaults to the current month).
 // Auth: any logged-in user.
 // ============================================================
@@ -25,6 +31,14 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import { query, queryOne } from '@/lib/pg';
 import { requireAuth } from '@/lib/auth';
 import { isoToUtcDate, weekdayOf } from '@/lib/attendance-db';
+
+// The day the portal's automated attendance rules go live. BEFORE this date,
+// present/leave were maintained manually off-portal and already processed, so
+// we must never invent days (no synthesized ABSENT / OFF_DAY / HOLIDAY) — doing
+// so would contradict the manual record (e.g. mark a leave day as ABSENT). For
+// those months we show ONLY the real figures actually on file. From this date
+// on, the full month calendar is synthesized.
+const RULES_START = '2026-07-01';
 
 function monthRange(month: string): { start: string; end: string } {
   // start = first of month, end = first of next month (exclusive)
@@ -160,6 +174,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     for (const iso of dateSpan(synthStart, cap)) {
       const real = rowByDate.get(iso);
       if (real) { days.push(real); continue; }
+      // Manual era: show only what's truly on file, never an invented day.
+      if (iso < RULES_START) continue;
       if (holByDate.has(iso)) { days.push(synthDay(iso, 'HOLIDAY', 0, holByDate.get(iso)!)); continue; }
       if (weekdayOf(iso) === emp.weeklyOffDay) { days.push(synthDay(iso, 'OFF_DAY', 0, null)); continue; }
       const lv = leaveByDate.get(iso);

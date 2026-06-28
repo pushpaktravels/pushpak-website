@@ -209,17 +209,6 @@ function MyDocuments() {
     finally { setBusy(false); }
   }
 
-  async function onDelete(id: string) {
-    if (!confirm('Remove this document?')) return;
-    setBusy(true); setError(null);
-    try {
-      const r = await fetch(`/api/me/documents/${id}`, { method: 'DELETE' }).then(x => x.json());
-      if (!r?.ok) throw new Error(r?.error || 'Delete failed');
-      await refresh();
-    } catch (e: any) { setError(e.message); }
-    finally { setBusy(false); }
-  }
-
   if (linked === false) {
     return (
       <div style={{ fontSize: 13, color: 'var(--ink-soft)', lineHeight: 1.6 }}>
@@ -232,7 +221,8 @@ function MyDocuments() {
     <div>
       <div style={{ fontSize: 12.5, color: 'var(--ink-soft)', lineHeight: 1.6, marginBottom: 14 }}>
         Upload your own ID papers (Aadhaar, PAN, bank passbook, address proof). They’re private to you —
-        only you can see or remove them here. PDF or photo, up to 10&nbsp;MB each.
+        only you can see them here. Once uploaded they stay on file; ask the office if something needs changing.
+        PDF or photo, up to 10&nbsp;MB each.
       </div>
 
       <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 16 }}>
@@ -277,8 +267,6 @@ function MyDocuments() {
               <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
                 <a href={`/api/me/documents/${f.id}`} target="_blank" rel="noreferrer"
                   style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--navy-deep, #1A3F7E)', textDecoration: 'none', padding: '6px 10px' }}>View</a>
-                <button onClick={() => onDelete(f.id)} disabled={busy}
-                  style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--rust, #B5483D)', background: 'none', border: 'none', cursor: 'pointer', padding: '6px 10px' }}>Remove</button>
               </div>
             </div>
           ))}
