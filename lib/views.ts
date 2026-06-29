@@ -77,7 +77,7 @@ export const VIEWS: ViewRow[] = [
   { key: 'upload',              label: 'Upload & Refresh',    group: 'Accounts & Followup',   roles: ['owner', 'admin'] },
   { key: 'performance',         label: 'Performance',         group: 'Accounts & Followup',   roles: ['owner', 'admin', 'cm-accounts', 'accounts'] },
   { key: 'scoreboard',          label: 'Scoreboard',          group: 'Accounts & Followup',   roles: ['owner', 'admin', 'cm-accounts'] },
-  { key: 'insights',            label: 'Insights',            group: 'Accounts & Followup',   roles: ['owner', 'insights'] },
+  { key: 'insights',            label: 'Insights',            group: 'Accounts & Followup',   roles: ['owner', 'admin', 'insights'] },
   // Domestic Reservations module — booking workspace for the
   // domestic-reservations department. Owner/admin oversee; the desk
   // staff get these by default. Stand-alone (no Account link yet).
@@ -137,7 +137,7 @@ export const VIEWS: ViewRow[] = [
   { key: 'leave-admin',         label: 'Record Leave',        group: 'HR & Payroll',          roles: ['owner', 'admin', 'hr'] },
   // Governance / settings.
   { key: 'users-auth',          label: 'Users & Authorities', group: 'Governance & Settings', roles: ['owner'] },
-  { key: 'bulk-cm',             label: 'Bulk CM Assignment',  group: 'Governance & Settings', roles: ['owner', 'admin'] },
+  { key: 'bulk-cm',             label: 'Bulk CM Assignment',  group: 'Governance & Settings', roles: ['owner', 'admin', 'cm-accounts'] },
   { key: 'audit',               label: 'Audit Log',           group: 'Governance & Settings', roles: ['owner'] },
   { key: 'activity',            label: 'Activity & Time',     group: 'Governance & Settings', roles: ['owner', 'admin'] },
   { key: 'settings',            label: 'Settings',            group: 'Governance & Settings', roles: ['owner', 'admin'] },
@@ -240,3 +240,19 @@ export function requireViewEdit(
   res.status(403).json({ ok: false, error: 'View-only: you cannot make changes here' });
   return false;
 }
+
+// ── Intentional non-view gates (NOT governed by the Users & Authorities grid) ──
+// Audited 2026-06-29: nearly every confidential route gates on a view above, so
+// the per-user grid (Visible / View-only) is authoritative. A small, deliberate
+// set still gates on role/owner instead — by design, do NOT convert these:
+//   • The permission system itself — /api/users, /api/role-defaults,
+//     /api/users/login-history, /api/audit → owner-only (root of trust; the
+//     screen that SETS access must not be delegatable from inside that screen).
+//   • Covert chat oversight — /api/messages/admin → owner-only, and must never
+//     surface to execs (no read receipts; the owner is never a participant).
+//   • Manager-only bulk actions nested INSIDE a broader view — the Legal Ledger
+//     bulk-convert (/api/legal/bulk-convert) and the Active-hold manager checks
+//     (/api/holds/*) stay owner/admin/cm-accounts. The VIEW (Legal / Hold Check)
+//     is grid-controlled for visibility, but the destructive bulk button is kept
+//     to managers so granting plain view access can't hand it to junior staff.
+// Everything else confidential gates on requireView / requireViewEdit above.

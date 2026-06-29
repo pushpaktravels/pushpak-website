@@ -12,7 +12,8 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { z } from 'zod';
 import { query, withTransaction, newId } from '@/lib/pg';
-import { requireAuth, requireRole } from '@/lib/auth';
+import { requireAuth } from '@/lib/auth';
+import { requireViewEdit } from '@/lib/views';
 import { audit } from '@/lib/audit';
 
 const Body = z.object({
@@ -27,7 +28,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'Method not allowed' });
   const user = await requireAuth(req, res);
   if (!user) return;
-  if (!requireRole(user, res, 'owner', 'admin', 'cm-accounts')) return;
+  if (!requireViewEdit(user, res, 'bulk-cm')) return;
 
   const parsed = Body.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ ok: false, error: 'Bad request', detail: parsed.error.flatten() });

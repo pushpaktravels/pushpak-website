@@ -9,13 +9,14 @@
 // ============================================================
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { query } from '@/lib/pg';
-import { requireAuth, requireRole } from '@/lib/auth';
+import { requireAuth } from '@/lib/auth';
+import { requireView } from '@/lib/views';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'GET') return res.status(405).json({ ok: false, error: 'Method not allowed' });
   const user = await requireAuth(req, res);
   if (!user) return;
-  if (!requireRole(user, res, 'owner', 'admin')) return;
+  if (!requireView(user, res, 'families')) return;
 
   try {
     const rows = await query<any>(

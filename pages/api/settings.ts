@@ -8,7 +8,8 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { z } from 'zod';
 import { query, withTransaction } from '@/lib/pg';
-import { requireAuth, requireRole } from '@/lib/auth';
+import { requireAuth } from '@/lib/auth';
+import { requireView, requireViewEdit } from '@/lib/views';
 import { audit } from '@/lib/audit';
 import { bustPolicyCache } from '@/lib/policy';
 
@@ -25,7 +26,7 @@ const PatchBody = z.object({
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const user = await requireAuth(req, res);
   if (!user) return;
-  if (!requireRole(user, res, 'owner', 'admin')) return;
+  if (!requireView(user, res, 'settings')) return;
 
   if (req.method === 'GET') {
     try {
@@ -43,6 +44,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   if (req.method === 'PATCH') {
+    // Saving requires edit rights on the Settings view, so the grid's
+    // View-only flag is honoured (owner/admin keep full access by default).
+    if (!requireViewEdit(user, res, 'settings')) return;
     const parsed = PatchBody.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ ok: false, error: 'Bad request', detail: parsed.error.flatten() });
 

@@ -14,7 +14,8 @@
 // ============================================================
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { query } from '@/lib/pg';
-import { requireAuth, requireRole } from '@/lib/auth';
+import { requireAuth } from '@/lib/auth';
+import { requireView } from '@/lib/views';
 
 function todayIST(): string {
   const d = new Date();
@@ -27,7 +28,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (req.method !== 'GET') return res.status(405).json({ ok: false, error: 'Method not allowed' });
   const user = await requireAuth(req, res);
   if (!user) return;
-  if (!requireRole(user, res, 'owner', 'admin')) return;
+  if (!requireView(user, res, 'activity')) return;
 
   const until = (typeof req.query.until === 'string' && req.query.until) || todayIST();
   const since = (typeof req.query.since === 'string' && req.query.since)

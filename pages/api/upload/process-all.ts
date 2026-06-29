@@ -17,7 +17,8 @@
 // completes in ~1 round-trip per table.
 // ============================================================
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { requireAuth, requireRole } from '@/lib/auth';
+import { requireAuth } from '@/lib/auth';
+import { requireViewEdit } from '@/lib/views';
 import { audit } from '@/lib/audit';
 import { query, withTransaction } from '@/lib/pg';
 import { readUploadedFiles } from '@/lib/upload-multipart';
@@ -38,7 +39,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'Method not allowed' });
   const user = await requireAuth(req, res);
   if (!user) return;
-  if (!requireRole(user, res, 'owner', 'admin')) return;
+  if (!requireViewEdit(user, res, 'upload')) return;
 
   const tStart = Date.now();
   let files: Record<string, any>;

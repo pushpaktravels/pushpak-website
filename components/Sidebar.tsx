@@ -148,7 +148,7 @@ const SECTIONS: NavSection[] = [
     items: [
       { view: 'performance', label: 'Performance', href: '/portal/performance', roles: ['owner','admin','cm-accounts','accounts'], dept: 'followup', icon: <svg viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg> },
       { view: 'scoreboard',  label: 'Scoreboard',  href: '/portal/scoreboard',  roles: ['owner','admin','cm-accounts'],         dept: 'followup', icon: <svg viewBox="0 0 24 24"><path d="M6 9h12M6 15h12M4 5l16 0v14H4z"/></svg> },
-      { view: 'insights',    label: 'Insights',    href: '/portal/insights',    roles: ['owner','insights'],            dept: 'followup', icon: <svg viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M7 14l4-4 4 4 5-7"/></svg> },
+      { view: 'insights',    label: 'Insights',    href: '/portal/insights',    roles: ['owner','admin','insights'],    dept: 'followup', icon: <svg viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M7 14l4-4 4 4 5-7"/></svg> },
     ],
   },
   {
@@ -156,7 +156,7 @@ const SECTIONS: NavSection[] = [
     roles: ['owner', 'admin'],
     items: [
       { view: 'upload',  label: 'Upload & Refresh',    href: '/portal/upload',  roles: ['owner','admin'], dept: 'followup', icon: <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg> },
-      { view: 'bulk-cm', label: 'Bulk CM Assignment',  href: '/portal/bulk-cm', roles: ['owner','admin'], dept: 'followup', icon: <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M20 8v6M23 11h-6"/></svg> },
+      { view: 'bulk-cm', label: 'Bulk CM Assignment',  href: '/portal/bulk-cm', roles: ['owner','admin','cm-accounts'], dept: 'followup', icon: <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M20 8v6M23 11h-6"/></svg> },
     ],
   },
 
