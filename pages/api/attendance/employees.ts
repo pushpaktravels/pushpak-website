@@ -54,8 +54,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   if (req.method === 'GET') {
     const rows = await query(
+      // dob / joiningDate are DATE columns; format them as plain YYYY-MM-DD text
+      // IN THE DB so the client never sees a timezone-shifted timestamp. Returning
+      // a raw Date serializes to a full ISO string (e.g. "1986-11-07T18:30:00Z"),
+      // which a <input type=date> can't display AND which fails the PATCH date
+      // regex on save — that was the "Bad request" when changing an employee.
       `SELECT id, "machineCode", "loginExecId", "hrCode", name, department, designation, mobile, email,
-              dob, "joiningDate", "monthlySalary", "shiftIn", "shiftOut", "weeklyOffDay", "weeklyOffSet",
+              to_char(dob, 'YYYY-MM-DD') AS dob,
+              to_char("joiningDate", 'YYYY-MM-DD') AS "joiningDate",
+              "monthlySalary", "shiftIn", "shiftOut", "weeklyOffDay", "weeklyOffSet",
               "attendanceMode", "leavesCarryOver", "carryOverDays", active, "createdAt", "updatedAt"
          FROM "Employee"
         ORDER BY active DESC, department NULLS LAST, name`,

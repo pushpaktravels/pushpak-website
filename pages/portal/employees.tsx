@@ -219,21 +219,6 @@ function EmployeesInner() {
     } catch (e: any) { setError(e.message); load(); }
   }
 
-  // Inline attendance-mode switch from the table: 'biometric' (office
-  // machine) ↔ 'offsite' (self check-in for field / second-location staff).
-  async function setAttendanceMode(emp: Employee, mode: string) {
-    setError(null);
-    setEmployees(list => list.map(x => x.id === emp.id ? { ...x, attendanceMode: mode } : x));
-    try {
-      const r = await fetch('/api/attendance/employees', {
-        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: emp.id, attendanceMode: mode }),
-      });
-      const d = await r.json();
-      if (!d.ok) { setError(d.error || 'Could not change attendance mode'); load(); }
-    } catch (e: any) { setError(e.message); load(); }
-  }
-
   return (
     <div style={{ maxWidth: 1280, margin: '0 auto', padding: '4px 4px 60px' }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 16, marginBottom: 18, flexWrap: 'wrap' }}>
@@ -372,19 +357,10 @@ function EmployeesInner() {
                       </select>
                     </td>
                     <td style={{ ...td, whiteSpace: 'nowrap' }}>
-                      <select
-                        value={e.attendanceMode || 'biometric'}
-                        onChange={ev => setAttendanceMode(e, ev.target.value)}
-                        title="How this employee's attendance is recorded"
-                        style={{
-                          padding: '4px 6px', borderRadius: 6, fontSize: 12.5, color: 'var(--ink)', cursor: 'pointer',
-                          border: `1px solid ${e.attendanceMode === 'offsite' ? 'rgba(46,108,84,0.6)' : 'rgba(15,40,85,0.2)'}`,
-                          background: e.attendanceMode === 'offsite' ? 'rgba(46,108,84,0.08)' : '#fff',
-                        }}
-                      >
-                        <option value="biometric">Office</option>
-                        <option value="offsite">Offsite</option>
-                      </select>
+                      {/* Read-only here — change it from the Edit popup. */}
+                      <span style={pill(e.attendanceMode === 'offsite' ? 'sage' : 'muted')}>
+                        {e.attendanceMode === 'offsite' ? 'Offsite' : 'Office'}
+                      </span>
                     </td>
                     <td style={{ ...td, fontVariantNumeric: 'tabular-nums' }}>
                       {Number(e.monthlySalary) > 0 ? `₹${Number(e.monthlySalary).toLocaleString('en-IN')}` : '—'}
