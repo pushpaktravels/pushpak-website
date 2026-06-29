@@ -83,6 +83,7 @@ const minIso = (a: string, b: string) => (a < b ? a : b);
 function leaveDisplay(kind: string | null): { status: string; deduction: number } | null {
   switch (kind) {
     case 'FULL_DAY':
+    case 'PERIOD_LEAVE':      return { status: 'LEAVE', deduction: 0 }; // paid period leave shows as a leave day
     case 'PAID_FROM_BALANCE': return { status: 'LEAVE', deduction: 0 };
     case 'LWP':               return { status: 'LEAVE', deduction: 1 }; // unpaid, still a leave day
     case 'HALF_DAY':          return { status: 'HALF_DAY', deduction: 0.5 };

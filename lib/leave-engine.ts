@@ -64,7 +64,11 @@ export function planLeave(kind: LeaveKindSS, fromDate: string, toDateRaw?: strin
   if (numDays > 60) return { ok: false, error: 'That range is too long (max 60 days).' };
 
   const perDay = balancePerDay(kind);          // 1 / 0.5 / 0
-  const days = kind === 'HALF_DAY' ? 0.5 : (kind === 'FULL_DAY' ? numDays : 0);
+  // Full-day AND period leave occupy whole calendar days, so the stored day
+  // count reflects the range; period leave just has perDay 0, so it never
+  // draws the paid-leave balance (balanceCost stays 0).
+  const fullSpan = kind === 'FULL_DAY' || kind === 'PERIOD_LEAVE';
+  const days = kind === 'HALF_DAY' ? 0.5 : (fullSpan ? numDays : 0);
   const balanceCost = perDay * (kind === 'HALF_DAY' ? 1 : numDays);
   const fy = financialYearOf(isoToUtcDate(fromDate));
 

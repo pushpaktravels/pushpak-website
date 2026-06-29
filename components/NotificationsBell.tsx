@@ -61,6 +61,7 @@ export function NotificationsBell() {
     });
     setOpen(false);
     if (n.kind === 'MESSAGE') router.push(`/portal/messages${n.convId ? `?c=${n.convId}` : ''}`);
+    else if (n.kind === 'PERIOD_ALERT') router.push(`/portal/leave-admin`);
     else if (n.party) router.push(`/portal/worklist`);
     load();
   }

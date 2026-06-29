@@ -19,6 +19,8 @@ import { audit } from '@/lib/audit';
 import { financialYearOf } from '@/lib/attendance-db';
 import { LEAVE_KINDS, type LeaveKindSS } from '@/lib/leave';
 import { planLeave, recordLeave } from '@/lib/leave-engine';
+import { periodInsight, flagNewPeriodLeave } from '@/lib/period-leave';
+import { loadPeriodStarts, notifyOwnersPeriodFlag } from '@/lib/period-leave-server';
 
 const ISO = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -32,7 +34,7 @@ const Body = z.object({
 
 async function findEmployee(execId: string) {
   return queryOne<any>(
-    `SELECT id, name, "hrCode", department FROM "Employee"
+    `SELECT id, name, "hrCode", department, gender FROM "Employee"
       WHERE "loginExecId" = $1 AND active = TRUE`,
     [execId],
   );
@@ -76,11 +78,18 @@ async function list(req: NextApiRequest, res: NextApiResponse, emp: any) {
     [emp.id, fy],
   );
 
+  // Period leave is offered only to female staff; when eligible, surface the
+  // learned cycle so the page can show when the next one is expected.
+  const periodEligible = emp.gender === 'female';
+  const period = periodEligible ? periodInsight(await loadPeriodStarts(emp.id)) : null;
+
   return res.json({
     ok: true, linked: true, fy,
     employee: { name: emp.name, hrCode: emp.hrCode, department: emp.department },
     balance: balance || { opening: 18, used: 0, remaining: 18 },
     leaves,
+    periodEligible,
+    period,
   });
 }
 
@@ -89,9 +98,19 @@ async function create(req: NextApiRequest, res: NextApiResponse, user: any, emp:
   if (!parsed.success) return res.status(400).json({ ok: false, error: 'Bad request', detail: parsed.error.flatten() });
   const b = parsed.data;
 
+  // Period leave is for female staff only — gate it server-side, not just in
+  // the picker, so it can't be posted directly by an ineligible employee.
+  if (b.kind === 'PERIOD_LEAVE' && emp.gender !== 'female') {
+    return res.status(400).json({ ok: false, error: 'Period leave is available to female staff only.' });
+  }
+
   const planned = planLeave(b.kind as LeaveKindSS, b.fromDate, b.toDate);
   if (!planned.ok) return res.status(400).json({ ok: false, error: planned.error });
   const plan = planned.plan;
+
+  // Read the prior period-leave history BEFORE recording (so the new one isn't
+  // in it) to judge whether this entry is off-pattern.
+  const priorStarts = b.kind === 'PERIOD_LEAVE' ? await loadPeriodStarts(emp.id) : [];
 
   try {
     // Self-service: the author recorded on the request is the employee.
@@ -102,6 +121,13 @@ async function create(req: NextApiRequest, res: NextApiResponse, user: any, emp:
     audit(req, user, 'LEAVE_DECLARE', emp.name, {
       id, kind: plan.kind, fromDate: plan.fromDate, toDate: plan.toDate, days: plan.days, balanceCost: plan.balanceCost,
     });
+
+    // Cycle check: alert the owner(s) if this period leave looks off-pattern
+    // (too soon after the last one, or a second within the same month).
+    if (plan.kind === 'PERIOD_LEAVE') {
+      const flag = flagNewPeriodLeave(priorStarts, plan.fromDate);
+      if (flag.flagged && flag.reason) await notifyOwnersPeriodFlag(emp, plan.fromDate, flag.reason);
+    }
     return res.json({
       ok: true,
       data: { id, kind: plan.kind, fromDate: plan.fromDate, toDate: plan.toDate, days: plan.days, balanceCost: plan.balanceCost, daysTouched },

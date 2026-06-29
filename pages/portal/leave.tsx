@@ -8,8 +8,13 @@
 // ============================================================
 import { useEffect, useState } from 'react';
 import { AppShell } from '../../components/AppShell';
-import { LEAVE_KINDS, LEAVE_LABEL, LEAVE_HINT, isSingleDayKind, type LeaveKindSS } from '../../lib/leave';
+import { LEAVE_KINDS, LEAVE_LABEL, LEAVE_HINT, type LeaveKindSS } from '../../lib/leave';
+import { type PeriodInsight } from '../../lib/period-leave';
 import { fmtDate } from '../../lib/fmt';
+
+// Full-day, half-day AND period leave can cover a date range (show a "To" field);
+// the partial informed kinds are a single day.
+const hasRange = (k: LeaveKindSS) => k === 'FULL_DAY' || k === 'PERIOD_LEAVE';
 
 type Leave = {
   id: string; fromDate: string; toDate: string; days: string | number;
@@ -34,6 +39,8 @@ function LeaveInner() {
   const [linked, setLinked] = useState<boolean | null>(null);
   const [leaves, setLeaves] = useState<Leave[]>([]);
   const [balance, setBalance] = useState<Balance | null>(null);
+  const [periodEligible, setPeriodEligible] = useState(false);
+  const [period, setPeriod] = useState<PeriodInsight | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
@@ -44,7 +51,10 @@ function LeaveInner() {
       const r = await fetch('/api/leave');
       const d = await r.json();
       if (!d.ok) { setError(d.error || 'Failed to load'); setLinked(false); }
-      else { setLinked(d.linked); setLeaves(d.leaves || []); setBalance(d.balance || null); }
+      else {
+        setLinked(d.linked); setLeaves(d.leaves || []); setBalance(d.balance || null);
+        setPeriodEligible(!!d.periodEligible); setPeriod(d.period || null);
+      }
     } catch (e: any) { setError(e.message); }
     finally { setLoading(false); }
   }
@@ -78,7 +88,14 @@ function LeaveInner() {
       {error && <div style={{ marginBottom: 12 }}><Banner kind="error">{error}</Banner></div>}
       {msg && <div style={{ marginBottom: 12 }}><Banner kind="info">{msg}</Banner></div>}
 
-      <DeclareForm onDone={(m) => { setMsg(m); load(); }} onError={setError} />
+      {periodEligible && period?.nextExpected && (
+        <div style={{ marginBottom: 14, padding: '11px 15px', borderRadius: 10, fontSize: 12.5, color: '#8A3A5C', background: 'rgba(176,80,120,0.08)', border: '1px solid rgba(176,80,120,0.22)' }}>
+          Your next period leave is expected around <b>{fmtDate(period.nextExpected)}</b>
+          {period.windowFrom && period.windowTo ? ` (${fmtDate(period.windowFrom)}–${fmtDate(period.windowTo)})` : ''}.
+        </div>
+      )}
+
+      <DeclareForm periodEligible={periodEligible} onDone={(m) => { setMsg(m); load(); }} onError={setError} />
 
       <h2 style={{ fontSize: 15, fontWeight: 700, color: 'var(--ink)', margin: '26px 0 10px' }}>This year's leaves</h2>
       {leaves.length === 0 ? (
@@ -103,27 +120,28 @@ function LeaveInner() {
   );
 }
 
-function DeclareForm({ onDone, onError }: { onDone: (msg: string) => void; onError: (s: string) => void }) {
+function DeclareForm({ periodEligible, onDone, onError }: { periodEligible: boolean; onDone: (msg: string) => void; onError: (s: string) => void }) {
   const [kind, setKind] = useState<LeaveKindSS>('FULL_DAY');
   const [fromDate, setFromDate] = useState(todayIso());
   const [toDate, setToDate] = useState(todayIso());
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
-  const single = isSingleDayKind(kind);
-  const isFullDay = kind === 'FULL_DAY';
+  const range = hasRange(kind);
+  // Period leave is shown only to eligible (female) staff.
+  const kinds = LEAVE_KINDS.filter(k => k !== 'PERIOD_LEAVE' || periodEligible);
 
   async function submit() {
     setBusy(true); onError('');
     try {
       const body: any = { kind, fromDate, reason: reason || null };
-      if (isFullDay) body.toDate = toDate;
+      if (range) body.toDate = toDate;
       const r = await fetch('/api/leave', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
       });
       const d = await r.json();
       if (!d.ok) { onError(d.error || 'Could not record leave'); setBusy(false); return; }
       setReason('');
-      onDone(`${LEAVE_LABEL[kind]} recorded for ${fromDate}${isFullDay && toDate !== fromDate ? `–${toDate}` : ''}.`);
+      onDone(`${LEAVE_LABEL[kind]} recorded for ${fromDate}${range && toDate !== fromDate ? `–${toDate}` : ''}.`);
     } catch (e: any) { onError(e.message); }
     finally { setBusy(false); }
   }
@@ -134,13 +152,13 @@ function DeclareForm({ onDone, onError }: { onDone: (msg: string) => void; onErr
       <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'flex-end' }}>
         <Field label="Type">
           <select style={{ ...inp, width: 170 }} value={kind} onChange={e => setKind(e.target.value as LeaveKindSS)}>
-            {LEAVE_KINDS.map(k => <option key={k} value={k}>{LEAVE_LABEL[k]}</option>)}
+            {kinds.map(k => <option key={k} value={k}>{LEAVE_LABEL[k]}</option>)}
           </select>
         </Field>
-        <Field label={single || !isFullDay ? 'Date' : 'From'}>
+        <Field label={range ? 'From' : 'Date'}>
           <input type="date" style={inp} value={fromDate} onChange={e => { setFromDate(e.target.value); if (e.target.value > toDate) setToDate(e.target.value); }} />
         </Field>
-        {isFullDay && (
+        {range && (
           <Field label="To">
             <input type="date" style={inp} min={fromDate} value={toDate} onChange={e => setToDate(e.target.value)} />
           </Field>
@@ -184,9 +202,10 @@ function LeaveRow({ lv, onChanged, onError }: { lv: Leave; onChanged: () => void
 }
 
 // ─── small bits ──────────────────────────────────────────────
-function toneFor(k: LeaveKindSS): 'navy' | 'gold' | 'sage' {
+function toneFor(k: LeaveKindSS): 'navy' | 'gold' | 'sage' | 'rose' {
   if (k === 'FULL_DAY') return 'navy';
   if (k === 'HALF_DAY') return 'gold';
+  if (k === 'PERIOD_LEAVE') return 'rose';
   return 'sage';
 }
 function Card({ label, value, tone }: { label: string; value: number; tone: 'sage' | 'gold' | 'navy' }) {
@@ -215,11 +234,12 @@ const td: React.CSSProperties = { padding: '9px 12px', color: 'var(--ink)' };
 const inp: React.CSSProperties = { padding: '8px 10px', borderRadius: 8, border: '1px solid rgba(15,40,85,0.2)', fontSize: 13, boxSizing: 'border-box' };
 const btnPrimary: React.CSSProperties = { padding: '9px 18px', borderRadius: 8, background: 'linear-gradient(180deg,#1A3F7E,#0F2855)', color: '#fff', border: 'none', fontSize: 12.5, fontWeight: 700, cursor: 'pointer' };
 const btnLink: React.CSSProperties = { background: 'transparent', border: 'none', cursor: 'pointer', fontSize: 12.5, fontWeight: 700 };
-function pill(tone: 'sage' | 'gold' | 'navy'): React.CSSProperties {
+function pill(tone: 'sage' | 'gold' | 'navy' | 'rose'): React.CSSProperties {
   const map = {
     sage: ['rgba(46,108,84,0.12)', '#2E6C54'],
     gold: ['rgba(201,164,114,0.18)', '#9A7634'],
     navy: ['rgba(15,40,85,0.10)', 'var(--navy-deep, #1A3F7E)'],
+    rose: ['rgba(176,80,120,0.14)', '#A2456B'],
   }[tone];
   return { padding: '2px 8px', borderRadius: 999, fontSize: 10.5, fontWeight: 700, background: map[0], color: map[1], display: 'inline-block' };
 }

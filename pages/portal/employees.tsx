@@ -18,6 +18,7 @@ type Employee = {
   designation: string | null;
   mobile: string | null;
   email: string | null;
+  gender: string | null;
   dob: string | null;
   joiningDate: string | null;
   monthlySalary: string | number;
@@ -489,6 +490,7 @@ function EditDrawer({ employee, onClose, onSaved, onError }: {
       hrCode: f.hrCode, name: f.name,
       machineCode: emptyToNull(f.machineCode), loginExecId: emptyToNull(f.loginExecId), department: emptyToNull(f.department),
       designation: emptyToNull(f.designation), mobile: emptyToNull(f.mobile), email: emptyToNull(f.email),
+      gender: f.gender || null,
       dob: emptyToNull(f.dob), joiningDate: emptyToNull(f.joiningDate),
       monthlySalary: Number(f.monthlySalary) || 0,
       shiftIn: emptyToNull(f.shiftIn), shiftOut: emptyToNull(f.shiftOut),
@@ -552,6 +554,19 @@ function EditDrawer({ employee, onClose, onSaved, onError }: {
             <Field label="Joining Date"><input style={inp} type="date" value={f.joiningDate || ''} onChange={e => set('joiningDate', e.target.value)} /></Field>
           </Row>
           <Row>
+            <Field label="Gender">
+              <select style={inp} value={f.gender || ''} onChange={e => set('gender', e.target.value || null)}>
+                <option value="">—</option>
+                <option value="female">Female</option>
+                <option value="male">Male</option>
+                <option value="other">Other</option>
+              </select>
+            </Field>
+            <div style={{ flex: 1, display: 'flex', alignItems: 'flex-end', paddingBottom: 9, fontSize: 11.5, color: 'var(--ink-soft)', lineHeight: 1.35 }}>
+              Setting “Female” enables monthly period leave for this employee.
+            </div>
+          </Row>
+          <Row>
             <Field label="Leaves Carry Over">
               <select style={inp} value={f.leavesCarryOver ? '1' : '0'} onChange={e => set('leavesCarryOver', e.target.value === '1' as any)}>
                 <option value="0">No</option><option value="1">Yes</option>
@@ -586,7 +601,7 @@ function EditDrawer({ employee, onClose, onSaved, onError }: {
 function blankEmployee(): Employee {
   return {
     id: '', machineCode: null, loginExecId: null, hrCode: '', name: '', department: null, designation: null,
-    mobile: null, email: null, dob: null, joiningDate: null, monthlySalary: 0,
+    mobile: null, email: null, gender: null, dob: null, joiningDate: null, monthlySalary: 0,
     shiftIn: null, shiftOut: null, weeklyOffDay: 0, weeklyOffSet: true, leavesCarryOver: false, carryOverDays: 0, active: true,
     attendanceMode: 'biometric',
   };

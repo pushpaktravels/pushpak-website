@@ -123,7 +123,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   for (const l of leaves) {
     const from = typeof l.fromDate === 'string' ? l.fromDate.slice(0, 10) : istIso(new Date(l.fromDate));
     const to = typeof l.toDate === 'string' ? l.toDate.slice(0, 10) : istIso(new Date(l.toDate));
-    const kind = l.kind === 'HALF_DAY' ? 'HALF' : (l.kind === 'FULL_DAY' ? 'FULL' : null);
+    const kind = l.kind === 'HALF_DAY' ? 'HALF' : (l.kind === 'FULL_DAY' || l.kind === 'PERIOD_LEAVE' ? 'FULL' : null);
     if (!kind) continue; // ON_DUTY / late / early don't make a gap-day a leave
     for (let day = 1; day <= daysInMonth; day++) {
       const iso = `${yy}-${String(mm).padStart(2, '0')}-${String(day).padStart(2, '0')}`;

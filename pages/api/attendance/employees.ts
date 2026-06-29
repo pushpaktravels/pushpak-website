@@ -31,6 +31,7 @@ const Base = {
   designation: z.string().max(80).nullable().optional(),
   mobile: z.string().max(40).nullable().optional(),
   email: z.string().max(120).nullable().optional(),
+  gender: z.enum(['female', 'male', 'other']).nullable().optional(),
   dob: dateStr,
   joiningDate: dateStr,
   monthlySalary: z.number().min(0).optional(),
@@ -59,7 +60,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       // a raw Date serializes to a full ISO string (e.g. "1986-11-07T18:30:00Z"),
       // which a <input type=date> can't display AND which fails the PATCH date
       // regex on save — that was the "Bad request" when changing an employee.
-      `SELECT id, "machineCode", "loginExecId", "hrCode", name, department, designation, mobile, email,
+      `SELECT id, "machineCode", "loginExecId", "hrCode", name, department, designation, mobile, email, gender,
               to_char(dob, 'YYYY-MM-DD') AS dob,
               to_char("joiningDate", 'YYYY-MM-DD') AS "joiningDate",
               "monthlySalary", "shiftIn", "shiftOut", "weeklyOffDay", "weeklyOffSet",
@@ -88,14 +89,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       `INSERT INTO "Employee"
         (id, "machineCode", "hrCode", name, department, designation, mobile, email,
          dob, "joiningDate", "monthlySalary", "shiftIn", "shiftOut", "weeklyOffDay", "weeklyOffSet",
-         "attendanceMode", "leavesCarryOver", "carryOverDays", active, "createdAt", "updatedAt")
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,NOW(),NOW())`,
+         "attendanceMode", "leavesCarryOver", "carryOverDays", active, gender, "createdAt", "updatedAt")
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,NOW(),NOW())`,
       [id, d.machineCode ?? null, d.hrCode, d.name, d.department ?? null, d.designation ?? null,
        d.mobile ?? null, d.email ?? null, d.dob ?? null, d.joiningDate ?? null,
        d.monthlySalary ?? 0, d.shiftIn ?? null, d.shiftOut ?? null, d.weeklyOffDay ?? 0,
        d.weeklyOffSet ?? true,   // a manual create is an explicit setup → confirmed
        d.attendanceMode ?? 'biometric',
-       d.leavesCarryOver ?? false, d.carryOverDays ?? 0, d.active ?? true],
+       d.leavesCarryOver ?? false, d.carryOverDays ?? 0, d.active ?? true, d.gender ?? null],
     );
     audit(req, user, 'EMPLOYEE_CREATE', id, { hrCode: d.hrCode, name: d.name });
     return res.json({ ok: true, id });
@@ -130,7 +131,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // Build a COALESCE-style partial update: only provided keys change.
     const fields: Record<string, any> = {
       machineCode: d.machineCode, loginExecId: d.loginExecId, hrCode: d.hrCode, name: d.name, department: d.department,
-      designation: d.designation, mobile: d.mobile, email: d.email, dob: d.dob,
+      designation: d.designation, mobile: d.mobile, email: d.email, gender: d.gender, dob: d.dob,
       joiningDate: d.joiningDate, monthlySalary: d.monthlySalary, shiftIn: d.shiftIn,
       shiftOut: d.shiftOut, weeklyOffDay: d.weeklyOffDay, weeklyOffSet,
       attendanceMode: d.attendanceMode,

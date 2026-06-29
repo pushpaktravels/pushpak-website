@@ -93,8 +93,10 @@ export type DayContext = {
 // Look up the per-date context the classifier needs: is it a holiday, who has
 // time off covering the date, and how. Two leave vocabularies coexist:
 //   • legacy/classifier kinds (PAID_FROM_BALANCE / SPECIAL_PAID / LWP / ON_DUTY)
-//   • self-service kinds (FULL_DAY / HALF_DAY / LATE_ARRIVAL / EARLY_OUT)
-// FULL_DAY is normalised to a full-day leave; the partial kinds go to declByEmp.
+//   • self-service kinds (FULL_DAY / HALF_DAY / PERIOD_LEAVE / LATE_ARRIVAL / EARLY_OUT)
+// FULL_DAY and PERIOD_LEAVE are normalised to a full-day paid leave (so a later
+// biometric upload classifies the day LEAVE, never ABSENT); the partial kinds
+// go to declByEmp.
 export async function loadDayContext(q: Q, iso: string): Promise<DayContext> {
   const hol = await q(`SELECT 1 FROM "Holiday" WHERE date = $1 LIMIT 1`, [iso]);
   const leaves = await q(
@@ -109,7 +111,7 @@ export async function loadDayContext(q: Q, iso: string): Promise<DayContext> {
     const kind = l.kind as string | null;
     if (!kind) continue;
     if (kind === 'ON_DUTY') onDutyEmps.add(l.employeeId);
-    else if (kind === 'FULL_DAY') leaveByEmp.set(l.employeeId, 'PAID_FROM_BALANCE');
+    else if (kind === 'FULL_DAY' || kind === 'PERIOD_LEAVE') leaveByEmp.set(l.employeeId, 'PAID_FROM_BALANCE');
     else if (kind === 'HALF_DAY' || kind === 'LATE_ARRIVAL' || kind === 'EARLY_OUT') {
       declByEmp.set(l.employeeId, kind as LeaveKindSS);
     } else {

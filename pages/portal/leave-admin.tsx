@@ -10,17 +10,21 @@
 // ============================================================
 import { useEffect, useMemo, useState } from 'react';
 import { AppShell } from '../../components/AppShell';
-import { LEAVE_KINDS, LEAVE_LABEL, LEAVE_HINT, isSingleDayKind, type LeaveKindSS } from '../../lib/leave';
+import { LEAVE_KINDS, LEAVE_LABEL, LEAVE_HINT, type LeaveKindSS } from '../../lib/leave';
+import { type PeriodInsight } from '../../lib/period-leave';
 import { fmtDate } from '../../lib/fmt';
 
-type Emp = { id: string; name: string; hrCode: string; department: string | null; attendanceMode: string };
+// Full-day, half-day AND period leave can cover a date range (show a "To" field).
+const hasRange = (k: LeaveKindSS) => k === 'FULL_DAY' || k === 'PERIOD_LEAVE';
+
+type Emp = { id: string; name: string; hrCode: string; department: string | null; attendanceMode: string; gender: string | null };
 type Leave = {
   id: string; fromDate: string; toDate: string; days: string | number;
   kind: LeaveKindSS; reason: string | null; notes: string | null; status: string;
   appliedBy: string | null; createdAt: string;
 };
 type Balance = { opening: string | number; used: string | number; remaining: string | number };
-type Detail = { fy: string; employee: Emp; balance: Balance; leaves: Leave[] };
+type Detail = { fy: string; employee: Emp; balance: Balance; leaves: Leave[]; periodEligible?: boolean; period?: PeriodInsight | null };
 
 function todayIso(): string {
   const d = new Date();
@@ -135,8 +139,17 @@ function Inner() {
             </div>
           )}
 
+          {selected.gender === 'female' && detail?.period?.nextExpected && (
+            <div style={{ marginBottom: 14, padding: '11px 15px', borderRadius: 10, fontSize: 12.5, color: '#8A3A5C', background: 'rgba(176,80,120,0.08)', border: '1px solid rgba(176,80,120,0.22)' }}>
+              Next period leave expected around <b>{fmtDate(detail.period.nextExpected)}</b>
+              {detail.period.windowFrom && detail.period.windowTo ? ` (${fmtDate(detail.period.windowFrom)}–${fmtDate(detail.period.windowTo)})` : ''}.
+              {detail.period.cycleDays ? ` Cycle ≈ ${detail.period.cycleDays} days.` : ''}
+            </div>
+          )}
+
           <DeclareForm
             employeeId={selected.id}
+            periodEligible={selected.gender === 'female'}
             onDone={(m) => { setMsg(m); loadDetail(empId); loadEmployees(); }}
             onError={setError}
           />
@@ -172,27 +185,30 @@ function Inner() {
   );
 }
 
-function DeclareForm({ employeeId, onDone, onError }: { employeeId: string; onDone: (msg: string) => void; onError: (s: string) => void }) {
+function DeclareForm({ employeeId, periodEligible, onDone, onError }: { employeeId: string; periodEligible: boolean; onDone: (msg: string) => void; onError: (s: string) => void }) {
   const [kind, setKind] = useState<LeaveKindSS>('FULL_DAY');
   const [fromDate, setFromDate] = useState(todayIso());
   const [toDate, setToDate] = useState(todayIso());
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
-  const single = isSingleDayKind(kind);
-  const isFullDay = kind === 'FULL_DAY';
+  const range = hasRange(kind);
+  // Period leave is offered only for eligible (female) staff. If the picker
+  // is showing it and the employee changes to an ineligible one, fall back.
+  const kinds = LEAVE_KINDS.filter(k => k !== 'PERIOD_LEAVE' || periodEligible);
+  useEffect(() => { if (!periodEligible && kind === 'PERIOD_LEAVE') setKind('FULL_DAY'); }, [periodEligible, kind]);
 
   async function submit() {
     setBusy(true); onError('');
     try {
       const body: any = { employeeId, kind, fromDate, reason: reason || null };
-      if (isFullDay) body.toDate = toDate;
+      if (range) body.toDate = toDate;
       const r = await fetch('/api/attendance/leave-admin', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
       });
       const d = await r.json();
       if (!d.ok) { onError(d.error || 'Could not record leave'); setBusy(false); return; }
       setReason('');
-      onDone(`${LEAVE_LABEL[kind]} recorded for ${fromDate}${isFullDay && toDate !== fromDate ? `–${toDate}` : ''}.`);
+      onDone(`${LEAVE_LABEL[kind]} recorded for ${fromDate}${range && toDate !== fromDate ? `–${toDate}` : ''}.`);
     } catch (e: any) { onError(e.message); }
     finally { setBusy(false); }
   }
@@ -203,13 +219,13 @@ function DeclareForm({ employeeId, onDone, onError }: { employeeId: string; onDo
       <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'flex-end' }}>
         <Field label="Type">
           <select style={{ ...inp, width: 170 }} value={kind} onChange={e => setKind(e.target.value as LeaveKindSS)}>
-            {LEAVE_KINDS.map(k => <option key={k} value={k}>{LEAVE_LABEL[k]}</option>)}
+            {kinds.map(k => <option key={k} value={k}>{LEAVE_LABEL[k]}</option>)}
           </select>
         </Field>
-        <Field label={single || !isFullDay ? 'Date' : 'From'}>
+        <Field label={range ? 'From' : 'Date'}>
           <input type="date" style={inp} value={fromDate} onChange={e => { setFromDate(e.target.value); if (e.target.value > toDate) setToDate(e.target.value); }} />
         </Field>
-        {isFullDay && (
+        {range && (
           <Field label="To">
             <input type="date" style={inp} min={fromDate} value={toDate} onChange={e => setToDate(e.target.value)} />
           </Field>
@@ -254,9 +270,10 @@ function LeaveRow({ lv, onChanged, onError }: { lv: Leave; onChanged: () => void
 }
 
 // ─── small bits ──────────────────────────────────────────────
-function toneFor(k: LeaveKindSS): 'navy' | 'gold' | 'sage' {
+function toneFor(k: LeaveKindSS): 'navy' | 'gold' | 'sage' | 'rose' {
   if (k === 'FULL_DAY') return 'navy';
   if (k === 'HALF_DAY') return 'gold';
+  if (k === 'PERIOD_LEAVE') return 'rose';
   return 'sage';
 }
 function Card({ label, value, tone }: { label: string; value: number; tone: 'sage' | 'gold' | 'navy' }) {
@@ -285,11 +302,12 @@ const td: React.CSSProperties = { padding: '9px 12px', color: 'var(--ink)' };
 const inp: React.CSSProperties = { padding: '8px 10px', borderRadius: 8, border: '1px solid rgba(15,40,85,0.2)', fontSize: 13, boxSizing: 'border-box' };
 const btnPrimary: React.CSSProperties = { padding: '9px 18px', borderRadius: 8, background: 'linear-gradient(180deg,#1A3F7E,#0F2855)', color: '#fff', border: 'none', fontSize: 12.5, fontWeight: 700, cursor: 'pointer' };
 const btnLink: React.CSSProperties = { background: 'transparent', border: 'none', cursor: 'pointer', fontSize: 12.5, fontWeight: 700 };
-function pill(tone: 'sage' | 'gold' | 'navy'): React.CSSProperties {
+function pill(tone: 'sage' | 'gold' | 'navy' | 'rose'): React.CSSProperties {
   const map = {
     sage: ['rgba(46,108,84,0.12)', '#2E6C54'],
     gold: ['rgba(201,164,114,0.18)', '#9A7634'],
     navy: ['rgba(15,40,85,0.10)', 'var(--navy-deep, #1A3F7E)'],
+    rose: ['rgba(176,80,120,0.14)', '#A2456B'],
   }[tone];
   return { padding: '2px 8px', borderRadius: 999, fontSize: 10.5, fontWeight: 700, background: map[0], color: map[1], display: 'inline-block' };
 }
